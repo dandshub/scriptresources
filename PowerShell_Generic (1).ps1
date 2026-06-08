@@ -19,7 +19,7 @@
 $CustomerUID = "356a93fc-4ed1-45d6-aef1-a6b26620a51f/"
 
 #Snap Installer name
-$CompanyEXE = " CaseyCoKitchensLtd_snap_installer.exe" 
+$CompanyEXE = "CaseyCoKitchensLtd_snap_installer.exe" 
 
 
 ##############################
