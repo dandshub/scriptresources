@@ -36,14 +36,17 @@
     <p>You're connected to our support team. Type below to chat with us.</p>
   </div>
 
-  <!-- 3CX Live Chat widget. minimized="false" opens the chat straight away. -->
+  <!-- 3CX Live Chat widget. The script below auto-opens the chat panel.
+       allow-call="false" = chat only, so the auto-open lands straight in chat.
+       Set allow-call="true" if you also want a click-to-call option (the
+       bubble will then open a Call/Chat menu instead of chat directly). -->
   <call-us
     phonesystem-url="https://1303.3cx.cloud"
     party="LiveChat595749"
     id="wp-live-chat-by-3CX"
     minimized="false"
     animation-style="noanimation"
-    allow-call="true"
+    allow-call="false"
     allow-video="false"
     allow-soundnotifications="true"
     enable-mute="true"
@@ -67,5 +70,26 @@
     style="position:fixed;right:16px;bottom:16px;z-index:99999;font-size:16px;line-height:17px;"
   ></call-us>
   <script defer src="https://downloads-global.3cx.com/downloads/livechatandtalk/v1/callus.js" id="tcx-callus-js" charset="utf-8"></script>
+
+  <!-- Auto-open the chat: click the launcher as soon as the widget renders.
+       (The 3CX widget ignores minimized="false" on its own, so we nudge it.) -->
+  <script>
+    (function () {
+      var tries = 0;
+      var timer = setInterval(function () {
+        tries++;
+        var host = document.querySelector('call-us');
+        if (host && host.shadowRoot) {
+          var nodes = host.shadowRoot.querySelectorAll(
+            'button,[role=button],a,[class*=bubble],[class*=launch],[class*=btn],[class*=callus]');
+          for (var i = 0; i < nodes.length; i++) {
+            var r = nodes[i].getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) { nodes[i].click(); clearInterval(timer); return; }
+          }
+        }
+        if (tries > 40) clearInterval(timer);
+      }, 400);
+    })();
+  </script>
 </body>
 </html>

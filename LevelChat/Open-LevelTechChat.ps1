@@ -84,7 +84,7 @@ else {
     id="wp-live-chat-by-3CX"
     minimized="false"
     animation-style="noanimation"
-    allow-call="true"
+    allow-call="false"
     allow-video="false"
     enable="true"
     authentication="none"
@@ -99,6 +99,24 @@ else {
     style="position:fixed;right:16px;bottom:16px;z-index:99999;font-size:16px;line-height:17px;"
   ></call-us>
   <script defer src="https://downloads-global.3cx.com/downloads/livechatandtalk/v1/callus.js" id="tcx-callus-js" charset="utf-8"></script>
+  <script>
+    (function () {
+      var tries = 0;
+      var timer = setInterval(function () {
+        tries++;
+        var host = document.querySelector('call-us');
+        if (host && host.shadowRoot) {
+          var nodes = host.shadowRoot.querySelectorAll(
+            'button,[role=button],a,[class*=bubble],[class*=launch],[class*=btn],[class*=callus]');
+          for (var i = 0; i < nodes.length; i++) {
+            var r = nodes[i].getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) { nodes[i].click(); clearInterval(timer); return; }
+          }
+        }
+        if (tries > 40) clearInterval(timer);
+      }, 400);
+    })();
+  </script>
 </body>
 </html>
 "@

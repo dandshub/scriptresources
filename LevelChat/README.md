@@ -61,8 +61,8 @@ In the source you're editing (the "Add Live Chat" screen):
 | **Destination** | Dept DS Business Hub Ltd | Where chats ring — make sure agents are logged in |
 | **Your website** | your hosting domain (Option 1) or your main site | Required; also the domain restriction |
 | **What visitor info to collect** | **None** (or Name only) | Skips the pre-chat form so the user chats immediately |
-| **Allow calls and chats** | **Chat Only** | We want a text window (leave on Phone + Chat if you also want click-to-call) |
-| **Startup Mode** | any (the page forces the chat open) | `chat.html` sets `minimized="false"` |
+| **Allow calls and chats** | **Chat Only** | So the auto-open lands straight in chat (Phone + Chat makes the bubble open a Call/Chat menu instead) |
+| **Startup Mode** | any | `chat.html` auto-opens the chat with a small script, regardless of this setting |
 
 If you regenerate the snippet in 3CX, replace the `<call-us ...>` block and the
 `<script ...>` line in `chat.html` (and update `$PbxUrl` / `$Party` if you use
