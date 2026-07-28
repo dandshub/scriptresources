@@ -71,23 +71,60 @@
   ></call-us>
   <script defer src="https://downloads-global.3cx.com/downloads/livechatandtalk/v1/callus.js" id="tcx-callus-js" charset="utf-8"></script>
 
-  <!-- Auto-open the chat: click the launcher as soon as the widget renders.
-       (The 3CX widget ignores minimized="false" on its own, so we nudge it.) -->
+  <!-- Auto-open the chat. The 3CX widget ignores minimized="false", so we
+       walk every (nested) shadow root, find the launcher bubble by its
+       bottom-right position, and fire a full click on it - repeating until a
+       chat input appears (which means the panel is open). -->
   <script>
     (function () {
+      function deep(root, out) {
+        var els = root.querySelectorAll('*');
+        for (var i = 0; i < els.length; i++) {
+          out.push(els[i]);
+          if (els[i].shadowRoot) deep(els[i].shadowRoot, out);
+        }
+      }
+      function vis(el) {
+        var r = el.getBoundingClientRect();
+        return r.width > 4 && r.height > 4 && r.bottom > 0 && r.right > 0;
+      }
+      function chatOpen(all) {
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i], t = el.tagName;
+          if ((t === 'INPUT' || t === 'TEXTAREA' || el.isContentEditable) && vis(el)) return true;
+        }
+        return false;
+      }
+      function launcher(all) {
+        var best = null, score = -1;
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          if (!vis(el)) continue;
+          var r = el.getBoundingClientRect();
+          if (r.width > 140 || r.height > 140) continue;  // skip big containers
+          var s = r.bottom + r.right;                      // most bottom-right wins
+          if (s > score) { score = s; best = el; }
+        }
+        return best;
+      }
+      function fire(el) {
+        var types = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+        for (var i = 0; i < types.length; i++) {
+          var ev;
+          try { ev = new MouseEvent(types[i], { bubbles: true, cancelable: true, composed: true }); }
+          catch (e) { ev = document.createEvent('MouseEvents'); ev.initEvent(types[i], true, true); }
+          el.dispatchEvent(ev);
+        }
+      }
       var tries = 0;
       var timer = setInterval(function () {
         tries++;
-        var host = document.querySelector('call-us');
-        if (host && host.shadowRoot) {
-          var nodes = host.shadowRoot.querySelectorAll(
-            'button,[role=button],a,[class*=bubble],[class*=launch],[class*=btn],[class*=callus]');
-          for (var i = 0; i < nodes.length; i++) {
-            var r = nodes[i].getBoundingClientRect();
-            if (r.width > 0 && r.height > 0) { nodes[i].click(); clearInterval(timer); return; }
-          }
-        }
-        if (tries > 40) clearInterval(timer);
+        var all = [];
+        deep(document, all);
+        if (chatOpen(all)) { clearInterval(timer); return; }
+        var b = launcher(all);
+        if (b) fire(b);
+        if (tries > 60) clearInterval(timer);
       }, 400);
     })();
   </script>
