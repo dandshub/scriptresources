@@ -1,16 +1,15 @@
 #############################################################################
-#  DS Business Hub - Level Tech Chat  :  OPEN CHAT (on-demand)              #
+#  DS Business Hub - Level Tech Chat  :  OPEN CHAT (tech-initiated)         #
 #                                                                           #
-#  The SIMPLE option. Run this from Level.io as an on-demand script the     #
-#  moment you connect to a machine. It pops your 3CX Live Chat window on    #
-#  the end-user's desktop - no background service, no install, nothing      #
-#  left running.                                                            #
+#  Run this from Level.io as an on-demand script the moment you connect to  #
+#  a machine. It pops your 3CX Live Chat window on the end-user's desktop.  #
+#  No install, no background service, nothing left running.                 #
 #                                                                           #
 #  Why the scheduled-task dance below?  Level runs scripts as SYSTEM, and   #
 #  SYSTEM cannot draw a window on the user's desktop (session-0 isolation). #
 #  So we briefly borrow the logged-on user's session to launch the window,  #
-#  then clean up.                                                           #
-#                                                    Ver 1.0                #
+#  then delete the task. The chat window keeps running.                     #
+#                                                    Ver 1.1                #
 #############################################################################
 
 
@@ -36,6 +35,10 @@ function Get-TimeStamp { return "[{0:yyyy-MM-dd HH:mm:ss}]" -f (Get-Date) }
 function Info($m) { Write-Host "$(Get-TimeStamp) $m" }
 function Fail($m) { Write-Host "$(Get-TimeStamp) [ERROR] $m"; exit 1 }
 
+# Tag baked into the Edge profile path so Close-LevelTechChat.ps1 can find and
+# close exactly this window (and nothing else the user has open).
+$ProfileTag = "DSBH-LevelTechChat-Edge"
+
 if ($ChatUrl -match "PASTE-YOUR-SOURCE-ID" -or [string]::IsNullOrWhiteSpace($ChatUrl)) {
     Fail "Set `$ChatUrl to your real 3CX Live Chat share link first."
 }
@@ -59,21 +62,25 @@ function Get-EdgePath {
     return $null
 }
 
+# We always launch via cmd's "start" so that:
+#   * %LOCALAPPDATA% expands in the USER's context (we run as SYSTEM), and
+#   * Edge is detached and survives after this script/task ends.
+$cmd = "$env:SystemRoot\System32\cmd.exe"
 $edge = Get-EdgePath
 if ($edge) {
-    $exec = $edge
-    $args = "--app=$ChatUrl --window-size=$WindowWidth,$WindowHeight --no-first-run --no-default-browser-check"
+    $profileDir = "%LOCALAPPDATA%\$ProfileTag"
+    $launchArgs = "/c start `"`" `"$edge`" --app=$ChatUrl --window-size=$WindowWidth,$WindowHeight --user-data-dir=`"$profileDir`" --no-first-run --no-default-browser-check"
 } else {
-    # Fallback: open in the user's default browser.
+    # Fallback: open in the user's default browser (no isolated profile / no
+    # targeted close - user closes it themselves).
     Info "Edge not found; using the default browser."
-    $exec = "$env:SystemRoot\System32\cmd.exe"
-    $args = "/c start `"`" `"$ChatUrl`""
+    $launchArgs = "/c start `"`" `"$ChatUrl`""
 }
 
 # ---- Launch it inside the user's session via a throwaway task ------------
 $TaskName = "DSBusinessHub-OpenChat-$([Guid]::NewGuid().ToString('N').Substring(0,8))"
 try {
-    $action    = New-ScheduledTaskAction -Execute $exec -Argument $args
+    $action    = New-ScheduledTaskAction -Execute $cmd -Argument $launchArgs
     $principal = New-ScheduledTaskPrincipal -UserId $targetUser -LogonType Interactive -RunLevel Limited
     $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 

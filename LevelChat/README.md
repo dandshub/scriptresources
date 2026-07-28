@@ -1,135 +1,82 @@
 # Level Tech Chat (3CX Live Chat pop-up for Level.io)
 
 Level.io has no built-in chat during a remote session. This bolts one on using
-your **existing 3CX Live Chat**: a small chat window opens on the end-user's
-desktop, and the tech answers from their normal 3CX Web Client / app. No new
-servers, no accounts.
+your **existing 3CX Live Chat**: when you connect to a machine, you click a
+button in Level and a small chat window opens on the end-user's desktop. They
+type; you answer from your normal 3CX Web Client / app.
 
 Why 3CX? It already owns both ends (the widget on the PC + your 3CX client for
 the tech) — which is exactly why chat "just works" in TeamViewer/Splashtop/etc.
-Anything on top of Level is a bolt-on, so the only real question is **what makes
-the window appear**. There are three approaches, simplest first.
+It's **tech-initiated**: nothing runs in the background, and you decide exactly
+when the window appears.
+
+```
+[You connect] -> run Open-LevelTechChat in Level -> 3CX chat window pops up
+                                                     on the user's desktop
+[You finish]  -> run Close-LevelTechChat (optional) -> window closes
+```
 
 > **The session-0 gotcha:** Level runs scripts as **SYSTEM**, and SYSTEM can't
-> draw a window on the user's desktop (session-0 isolation). Every option below
-> deals with this for you.
+> draw a window on the user's desktop (session-0 isolation). The open script
+> handles this by briefly borrowing the logged-on user's session to launch the
+> window, then cleaning up. You don't have to do anything about it.
 
----
+## What's here
 
-## Option A — On-demand, one click (recommended, simplest)
+| Script | When you run it |
+|--------|-----------------|
+| `Open-LevelTechChat.ps1` | On-demand, the moment you connect — pops the chat window |
+| `Close-LevelTechChat.ps1` | Optional, when you're done — closes just that window |
 
-**`Open-LevelTechChat.ps1`** — an on-demand Level script the tech runs the
-moment they connect. It pops the 3CX chat window in the user's session, then
-cleans up. **Nothing is installed, nothing runs in the background.**
+## Setup (one-time)
 
-1. Edit `$ChatUrl` (your 3CX Live Chat share link — see below).
-2. In Level, save it as an **on-demand script**.
-3. When you connect to a machine, click **Run**. Chat appears.
+### 1. Get your 3CX Live Chat link
 
-This is the sweet spot: reliable, zero footprint, and the tech controls exactly
-when it shows.
+1. 3CX Admin Console → **Live Chat** → open (or create) your chat **source**.
+2. **Share → Copy Link** — you'll get something like
+   `https://yourcompany.3cx.eu/callus/#/<source-id>`.
+3. Paste it into a browser to confirm it opens a working chat.
 
-## Option B — Quick heads-up (zero install, one-way)
+### 2. Put it in the script
 
-Built into Windows, works from a SYSTEM Level script today:
+Edit `$ChatUrl` at the top of `Open-LevelTechChat.ps1` with that link.
+(Optionally adjust `$WindowWidth` / `$WindowHeight`.)
+
+### 3. Save it in Level
+
+Add `Open-LevelTechChat.ps1` as an **on-demand script** in Level.io (run as
+SYSTEM — the default). Do the same with `Close-LevelTechChat.ps1` if you want a
+one-click close.
+
+## Day-to-day use
+
+1. Connect to the machine as usual.
+2. Run the **Open** script from Level → the chat window appears for the user.
+3. Chat with them from your 3CX client.
+4. Run the **Close** script when finished (or the user can just close the window).
+
+## Quick heads-up alternative (zero setup, one-way)
+
+If you only need to tell the user "I'm here" and don't need them to reply, this
+is built into Windows and works from a SYSTEM Level script with no 3CX at all:
 
 ```powershell
 msg * "Hi, it's Dan from support - I'm connected and taking a look now."
 ```
 
-`msg.exe` pops a message box on the user's screen. One-way only (they can't
-type back), but perfect for a quick "I'm here" without any chat setup.
-
-## Option C — Auto-detect (advanced, optional)
-
-**`Install-LevelTechChat.ps1`** — installs a lightweight background watcher that
-opens the chat **automatically** when it detects a Level remote session, with no
-tech action at all. More moving parts, and it depends on you pinning down Level's
-remote-session **process name** on your fleet (see below). Use this only if you
-want it fully hands-off. Remove it with `Uninstall-LevelTechChat.ps1`.
-
----
-
-## Get your 3CX Live Chat link (needed for A and C)
-
-1. 3CX Admin Console → **Live Chat** → open (or create) your chat **source**.
-2. **Share → Copy Link** — you'll get something like
-   `https://yourcompany.3cx.eu/callus/#/<source-id>`.
-3. Paste it into a browser to confirm it opens a working chat, then drop it into
-   `$ChatUrl`.
-
 ## Prerequisites
 
-- **Microsoft Edge** (on all supported Windows 10/11 — used in borderless "app"
-  mode; falls back to the default browser if absent).
+- **Microsoft Edge** (on all supported Windows 10/11 — used in a borderless
+  "app" window; falls back to the user's default browser if Edge is missing).
 - A **3CX Live Chat** source configured in your 3CX admin console.
-
----
-
-## Option C details (auto-detect)
-
-### What gets installed
-
-Everything lands in `C:\ProgramData\DSBusinessHub\LevelTechChat\`:
-
-| File | Purpose |
-|------|---------|
-| `Config.json` | Settings written from the installer's **EDIT ME** block |
-| `Watcher.ps1` | Runs in the logged-on user's session; opens/closes the window |
-| `run-hidden.vbs` | Launches the watcher with no console flash |
-| `watcher.log` | Debug log (when `DebugMode = 1`) |
-
-A per-user scheduled task **`DSBusinessHub-LevelTechChat`** starts the watcher at
-logon, running as the **interactive user** (so it can draw the window).
-
-### Find the Level remote-session process (important)
-
-The watcher decides "a session is live" by looking for a process that **only
-exists while a Level remote session is running**. This name can change between
-Level agent versions, so **verify it**:
-
-1. Start a real Level remote-control session to a test PC.
-2. On that PC: **Task Manager → Details**, and find the new Level helper `.exe`
-   that appears — and disappears when you end the session.
-3. Put its name in `$RemoteSessionProcesses`.
-
-> Do **not** list the always-on Level agent (e.g. `level` / `level-agent`) — that
-> runs 24/7 and would keep the chat open constantly.
-
-**Can't pin it down?** Use the manual trigger — the watcher also opens the window
-whenever this file exists:
-`C:\ProgramData\DSBusinessHub\LevelTechChat\open.trigger`
-
-```powershell
-# open now
-New-Item "C:\ProgramData\DSBusinessHub\LevelTechChat\open.trigger" -ItemType File -Force | Out-Null
-# close again
-Remove-Item "C:\ProgramData\DSBusinessHub\LevelTechChat\open.trigger" -Force -EA SilentlyContinue
-```
-
-### Config reference (`Install-LevelTechChat.ps1` → EDIT ME)
-
-| Setting | Meaning |
-|---------|---------|
-| `$ChatUrl` | Your 3CX Live Chat share link (required) |
-| `$RemoteSessionProcesses` | Process name(s) that mean "session is live" |
-| `$CloseOnDisconnect` | Auto-close the window when the session ends |
-| `$PollSeconds` | How often to check (default 3s) |
-| `$WindowWidth` / `$WindowHeight` | Chat window size |
-| `$DebugMode` | `1` writes `watcher.log`; `0` is silent |
-
-### Uninstall
-
-Run `Uninstall-LevelTechChat.ps1` from Level as SYSTEM. It removes the task, stops
-the watcher and any chat windows, and deletes the install folder and dedicated
-Edge profile.
-
----
 
 ## Notes & limits
 
-- The window is a normal Edge "app" window (small title bar, no address bar).
-- **Recommendation:** start with **Option A**. It's the least to go wrong, and the
-  tech triggering it on connect is more reliable than guessing Level's process
-  name. Keep Option B (`msg.exe`) for quick notices.
-- End-users can close the window; the tech can reopen it by running Option A again.
+- The window is a normal Edge "app" window (small title bar, no address bar). It
+  runs in its own tagged Edge profile, so it won't touch the user's browsing
+  session — and that tag is how the Close script targets only this window.
+- Requires a user to be **logged on** at the PC (there's no one to chat with
+  otherwise). If no one is logged on, the Open script says so and exits.
+- The chat routes to whoever is manning your 3CX Live Chat queue. If you want it
+  to reach the specific connecting tech, point `$ChatUrl` at that tech's own
+  Live Chat source, or handle routing in 3CX.
