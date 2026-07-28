@@ -9,7 +9,7 @@
 #  SYSTEM cannot draw a window on the user's desktop (session-0 isolation). #
 #  So we briefly borrow the logged-on user's session to launch the window,  #
 #  then delete the task. The chat window keeps running.                     #
-#                                                    Ver 1.1                #
+#                                                    Ver 1.2                #
 #############################################################################
 
 
@@ -17,13 +17,23 @@
 # EDIT ME
 ###########
 
-# Your 3CX Live Chat share link.
-#   3CX Admin Console > Live Chat > (your source) > Share > "Copy Link"
-$ChatUrl = "https://YOURCOMPANY.3cx.eu/callus/#/PASTE-YOUR-SOURCE-ID"
+# --- How the chat page is delivered -------------------------------------
+# OPTION 1 (recommended): host chat.html on your website and put its URL here.
+#   e.g. "https://dsbusinesshub.co.uk/support-chat.html"
+#   Then also set 3CX > Live Chat > "Your website" to that domain.
+# OPTION 2 (zero hosting): leave $HostedChatUrl blank. This script will drop a
+#   local copy of the chat page on the PC (built from the 3CX values below)
+#   and open that. Usually works; 3CX can refuse a file:// page if its domain
+#   restriction is strict - if so, switch to OPTION 1.
+$HostedChatUrl = ""
+
+# 3CX values (used only for OPTION 2, the local page). From your embed snippet:
+$PbxUrl = "https://1303.3cx.cloud"
+$Party  = "LiveChat595749"
 
 # Chat window size (pixels).
 $WindowWidth  = 400
-$WindowHeight = 620
+$WindowHeight = 640
 
 
 ##############################
@@ -38,9 +48,63 @@ function Fail($m) { Write-Host "$(Get-TimeStamp) [ERROR] $m"; exit 1 }
 # Tag baked into the Edge profile path so Close-LevelTechChat.ps1 can find and
 # close exactly this window (and nothing else the user has open).
 $ProfileTag = "DSBH-LevelTechChat-Edge"
+$InstallDir = Join-Path $env:ProgramData "DSBusinessHub\LevelTechChat"
 
-if ($ChatUrl -match "PASTE-YOUR-SOURCE-ID" -or [string]::IsNullOrWhiteSpace($ChatUrl)) {
-    Fail "Set `$ChatUrl to your real 3CX Live Chat share link first."
+# ---- Work out what URL to open -------------------------------------------
+if (-not [string]::IsNullOrWhiteSpace($HostedChatUrl)) {
+    $target = $HostedChatUrl
+    Info "Using hosted chat page: $target"
+}
+else {
+    # Build a local chat.html from the 3CX values and open it via file://
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    $htmlPath = Join-Path $InstallDir "chat.html"
+    $html = @"
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DS Business Hub - Support Chat</title>
+  <style>
+    html, body { height:100%; margin:0; background:#f4f6f8; font-family:"Segoe UI",Arial,sans-serif; }
+    .intro { padding:18px 16px; text-align:center; color:#2b2f33; }
+    .intro h1 { font-size:16px; margin:6px 0; }
+    .intro p  { font-size:13px; color:#6a7178; margin:0; }
+  </style>
+</head>
+<body>
+  <div class="intro">
+    <h1>DS Business Hub &mdash; Support Chat</h1>
+    <p>You're connected to our support team. Type below to chat with us.</p>
+  </div>
+  <call-us
+    phonesystem-url="$PbxUrl"
+    party="$Party"
+    id="wp-live-chat-by-3CX"
+    minimized="false"
+    animation-style="noanimation"
+    allow-call="true"
+    allow-video="false"
+    enable="true"
+    authentication="none"
+    operator-name="DS Business Hub Tech"
+    show-operator-actual-name="true"
+    gdpr-enabled="false"
+    message-userinfo-format="both"
+    lang="browser"
+    greeting-visibility="none"
+    button-icon-type="default"
+    chat-delay="0"
+    style="position:fixed;right:16px;bottom:16px;z-index:99999;font-size:16px;line-height:17px;"
+  ></call-us>
+  <script defer src="https://downloads-global.3cx.com/downloads/livechatandtalk/v1/callus.js" id="tcx-callus-js" charset="utf-8"></script>
+</body>
+</html>
+"@
+    Set-Content -Path $htmlPath -Value $html -Encoding UTF8
+    $target = "file:///" + ($htmlPath -replace '\\', '/')
+    Info "Using local chat page: $htmlPath"
 }
 
 # ---- Find the logged-on interactive user (owner of explorer.exe) ---------
@@ -69,12 +133,12 @@ $cmd = "$env:SystemRoot\System32\cmd.exe"
 $edge = Get-EdgePath
 if ($edge) {
     $profileDir = "%LOCALAPPDATA%\$ProfileTag"
-    $launchArgs = "/c start `"`" `"$edge`" --app=$ChatUrl --window-size=$WindowWidth,$WindowHeight --user-data-dir=`"$profileDir`" --no-first-run --no-default-browser-check"
+    $launchArgs = "/c start `"`" `"$edge`" --app=$target --window-size=$WindowWidth,$WindowHeight --user-data-dir=`"$profileDir`" --no-first-run --no-default-browser-check"
 } else {
     # Fallback: open in the user's default browser (no isolated profile / no
     # targeted close - user closes it themselves).
     Info "Edge not found; using the default browser."
-    $launchArgs = "/c start `"`" `"$ChatUrl`""
+    $launchArgs = "/c start `"`" `"$target`""
 }
 
 # ---- Launch it inside the user's session via a throwaway task ------------
