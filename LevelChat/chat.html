@@ -1,0 +1,71 @@
+<!doctype html>
+<!--
+  DS Business Hub - Support Chat page (3CX Live Chat wrapper)
+
+  This hosts your 3CX Live Chat widget so it can be opened as a pop-up window
+  during a Level.io remote session.
+
+  Two ways to use it:
+    1. HOST IT (recommended): upload this file to your website
+       (e.g. https://dsbusinesshub.co.uk/support-chat.html), set 3CX
+       "Your website" to that domain, and point $ChatUrl in
+       Open-LevelTechChat.ps1 at the URL.
+    2. LOCAL: Open-LevelTechChat.ps1 can also drop a copy of this page on the
+       PC and open it directly (no hosting needed).
+
+  If you regenerate the 3CX snippet, replace the <call-us ...> element and the
+  <script ...> line below. The important values are:
+    phonesystem-url="https://1303.3cx.cloud"  party="LiveChat595749"
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DS Business Hub - Support Chat</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #f4f6f8;
+      font-family: "Segoe UI", Arial, sans-serif; }
+    .intro { padding: 18px 16px; text-align: center; color: #2b2f33; }
+    .intro h1 { font-size: 16px; margin: 6px 0; }
+    .intro p  { font-size: 13px; color: #6a7178; margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="intro">
+    <h1>DS Business Hub &mdash; Support Chat</h1>
+    <p>You're connected to our support team. Type below to chat with us.</p>
+  </div>
+
+  <!-- 3CX Live Chat widget. minimized="false" opens the chat straight away. -->
+  <call-us
+    phonesystem-url="https://1303.3cx.cloud"
+    party="LiveChat595749"
+    id="wp-live-chat-by-3CX"
+    minimized="false"
+    animation-style="noanimation"
+    allow-call="true"
+    allow-video="false"
+    allow-soundnotifications="true"
+    enable-mute="true"
+    enable-onmobile="true"
+    offline-enabled="true"
+    enable="true"
+    authentication="none"
+    operator-name="DS Business Hub Tech"
+    show-operator-actual-name="true"
+    aknowledge-received="true"
+    gdpr-enabled="false"
+    message-userinfo-format="both"
+    message-dateformat="both"
+    lang="browser"
+    button-icon-type="default"
+    greeting-visibility="none"
+    greeting-offline-visibility="none"
+    chat-delay="0"
+    enable-direct-call="true"
+    enable-ga="false"
+    style="position:fixed;right:16px;bottom:16px;z-index:99999;font-size:16px;line-height:17px;"
+  ></call-us>
+  <script defer src="https://downloads-global.3cx.com/downloads/livechatandtalk/v1/callus.js" id="tcx-callus-js" charset="utf-8"></script>
+</body>
+</html>
