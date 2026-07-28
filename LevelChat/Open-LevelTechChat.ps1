@@ -102,53 +102,58 @@ else {
   <script>
     (function () {
       function deep(root, out) {
-        var els = root.querySelectorAll('*');
-        for (var i = 0; i < els.length; i++) {
-          out.push(els[i]);
-          if (els[i].shadowRoot) deep(els[i].shadowRoot, out);
+        var e = root.querySelectorAll('*');
+        for (var i = 0; i < e.length; i++) {
+          out.push(e[i]);
+          if (e[i].shadowRoot) deep(e[i].shadowRoot, out);
         }
       }
       function vis(el) {
         var r = el.getBoundingClientRect();
-        return r.width > 4 && r.height > 4 && r.bottom > 0 && r.right > 0;
-      }
-      function chatOpen(all) {
-        for (var i = 0; i < all.length; i++) {
-          var el = all[i], t = el.tagName;
-          if ((t === 'INPUT' || t === 'TEXTAREA' || el.isContentEditable) && vis(el)) return true;
+        if (!(r.width > 4 && r.height > 4)) return false;
+        if (r.bottom <= 0 || r.right <= 0 || r.top >= window.innerHeight || r.left >= window.innerWidth) return false;
+        if (el.checkVisibility) {
+          try { if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true })) return false; }
+          catch (e) {}
         }
-        return false;
+        return true;
       }
-      function launcher(all) {
-        var best = null, score = -1;
+      function byClass(all, c) {
         for (var i = 0; i < all.length; i++) {
-          var el = all[i];
-          if (!vis(el)) continue;
-          var r = el.getBoundingClientRect();
-          if (r.width > 140 || r.height > 140) continue;
-          var s = r.bottom + r.right;
-          if (s > score) { score = s; best = el; }
+          if (all[i].classList && all[i].classList.contains(c) && vis(all[i])) return all[i];
         }
-        return best;
+        return null;
+      }
+      function input(all) {
+        for (var i = 0; i < all.length; i++) {
+          var t = all[i].tagName;
+          if ((t === 'INPUT' || t === 'TEXTAREA' || all[i].isContentEditable) && vis(all[i])) return all[i];
+        }
+        return null;
       }
       function fire(el) {
-        var types = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
-        for (var i = 0; i < types.length; i++) {
+        var ty = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+        for (var i = 0; i < ty.length; i++) {
           var ev;
-          try { ev = new MouseEvent(types[i], { bubbles: true, cancelable: true, composed: true }); }
-          catch (e) { ev = document.createEvent('MouseEvents'); ev.initEvent(types[i], true, true); }
+          try { ev = new MouseEvent(ty[i], { bubbles: true, cancelable: true, composed: true }); }
+          catch (e) { ev = document.createEvent('MouseEvents'); ev.initEvent(ty[i], true, true); }
           el.dispatchEvent(ev);
         }
       }
-      var tries = 0;
+      var last = '', lastAt = 0, tries = 0;
       var timer = setInterval(function () {
         tries++;
         var all = [];
         deep(document, all);
-        if (chatOpen(all)) { clearInterval(timer); return; }
-        var b = launcher(all);
-        if (b) fire(b);
-        if (tries > 60) clearInterval(timer);
+        if (input(all)) { clearInterval(timer); return; }
+        var now = Date.now();
+        var sn = byClass(all, 'start-new');
+        if (sn) { if (!(last === 'sn' && now - lastAt < 1500)) { fire(sn); last = 'sn'; lastAt = now; } return; }
+        var open = byClass(all, 'footer-root') || byClass(all, 'chat-root') || byClass(all, 'panel_body');
+        if (open) return;
+        var bubble = byClass(all, 'minimized-button') || byClass(all, 'bubble');
+        if (bubble) { if (!(last === 'b' && now - lastAt < 1500)) { fire(bubble); last = 'b'; lastAt = now; } }
+        if (tries > 80) clearInterval(timer);
       }, 400);
     })();
   </script>
