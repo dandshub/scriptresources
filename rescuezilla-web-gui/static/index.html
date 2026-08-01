@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rescuezilla Web GUI</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- Login -->
+  <div id="login" class="login hidden">
+    <form id="loginForm" class="login-card">
+      <h1>Rescuezilla Web GUI</h1>
+      <input id="loginUser" placeholder="Username" autocomplete="username" required>
+      <input id="loginPass" type="password" placeholder="Password"
+             autocomplete="current-password" required>
+      <button type="submit">Sign in</button>
+      <p id="loginError" class="error"></p>
+    </form>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="hidden">
+    <header>
+      <h1>Rescuezilla Web GUI</h1>
+      <span id="imagesDir" class="muted"></span>
+      <span class="spacer"></span>
+      <button id="adminBtn" class="ghost hidden" onclick="toggleAdmin()">Admin</button>
+      <span id="whoami" class="muted"></span>
+      <button class="ghost" onclick="logout()">Sign out</button>
+    </header>
+
+    <main>
+      <aside id="sidebar">
+        <h2>Images</h2>
+        <div id="images" class="list"></div>
+        <h2>Active mounts</h2>
+        <div id="mounts" class="list"></div>
+      </aside>
+
+      <section id="browser">
+        <div id="crumbs" class="crumbs"></div>
+        <table id="files">
+          <thead>
+            <tr><th>Name</th><th>Size</th><th>Modified</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="empty" class="muted">Select a partition and mount it to browse files.</p>
+      </section>
+    </main>
+  </div>
+
+  <!-- Admin drawer -->
+  <div id="adminDrawer" class="drawer hidden">
+    <div class="drawer-head">
+      <h2>Administration</h2>
+      <button class="ghost" onclick="toggleAdmin()">Close</button>
+    </div>
+
+    <section>
+      <h3>Users</h3>
+      <div id="userList" class="list"></div>
+      <form id="userForm" class="inline">
+        <input id="newUser" placeholder="username" required>
+        <input id="newPass" type="password" placeholder="password" required>
+        <select id="newRole">
+          <option value="user">user</option>
+          <option value="admin">admin</option>
+        </select>
+        <button type="submit">Add user</button>
+      </form>
+    </section>
+
+    <section>
+      <h3>Share an image</h3>
+      <form id="shareForm" class="inline">
+        <select id="shareImage"></select>
+        <select id="shareUser"></select>
+        <button type="submit">Share</button>
+      </form>
+      <div id="shareList" class="list"></div>
+    </section>
+
+    <section>
+      <h3>BitLocker keys</h3>
+      <form id="blForm" class="inline">
+        <select id="blImage"></select>
+        <select id="blPart"></select>
+        <select id="blType">
+          <option value="recovery">recovery password</option>
+          <option value="password">user password</option>
+          <option value="bek">BEK file path</option>
+        </select>
+        <input id="blValue" placeholder="key / password" required>
+        <button type="submit">Save key</button>
+      </form>
+    </section>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
