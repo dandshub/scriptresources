@@ -2,3 +2,9 @@ fastapi>=0.110
 uvicorn[standard]>=0.27
 itsdangerous>=2.1
 
+# Optional: zero-copy raw/BitLocker backend (needs libfuse on the host too:
+# `sudo apt install fuse3`). Without these, raw images fall back to a full
+# local decompression instead.
+indexed_gzip>=1.8
+fusepy>=3.0.1
+

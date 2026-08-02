@@ -36,15 +36,42 @@ mount -o ro,loop <raw> <mountpoint>
 
 `--restore_raw_file` produces a **sparse** full-size filesystem image (only used
 blocks are written), so scratch usage is roughly the *used* data of the source
-partition. `dd` images skip partclone and are decompressed straight to the raw
-file.
+partition. Raw images (partitions Rescuezilla couldn't read with partclone —
+unsupported filesystems, BitLocker volumes) are handled separately (see below).
+
+Whether a partition is a partclone image or a raw dump is detected at mount time
+by peeking at the decompressed header for the partclone magic — the filename is
+not reliable (Rescuezilla names raw dumps `*.dd-ptcl-img.*` too).
+
+### Zero-copy raw backend
+
+A full raw partition (e.g. a large BitLocker Windows volume) would otherwise be
+decompressed to a full-size local file. Instead, when `indexed_gzip` + `fusepy`
+(+ libfuse) are available and the image is gzip, the raw path builds a small
+gzip **seek index** in a single streaming pass (no full local copy — only the
+index, tens of MB, is stored) and serves the decompressed partition through a
+one-file FUSE mount. That FUSE file is handed to dislocker / `mount -o ro,loop`
+exactly like a restored file.
+
+Trade-offs: the index build still reads the whole compressed image once (over
+the network, if it's on a share), and random reads re-decompress up to the index
+spacing (16 MiB) — so it trades local disk for some CPU/latency. Controlled by
+`RZGUI_ZEROCOPY` (`auto` | `on` | `off`); non-gzip images always fall back to a
+full local decompression.
+
+### BitLocker
+
+BitLocker volumes are detected from the reconstructed image's `-FVE-FS-`
+signature and unlocked with `dislocker` using a stored key (Admin → BitLocker
+keys). Without a key, the mount fails with a clear message telling you to add
+one.
 
 ## Requirements
 
 System packages (Debian/Ubuntu names):
 
 ```
-sudo apt install partclone ntfs-3g dislocker \
+sudo apt install partclone ntfs-3g dislocker fuse3 \
      gzip zstd lz4 xz-utils bzip2 lzop lzip   # decompressors you expect to need
 ```
 
@@ -87,6 +114,8 @@ Environment variables:
 | `RZGUI_PARTCLONE`  | `partclone.restore`      | partclone binary name/path           |
 | `RZGUI_STORE`      | `$WORK_DIR/rzgui-store.json` | user/ACL/key store (mode 0600)   |
 | `RZGUI_ADMIN_PASSWORD` | *(random)*           | initial admin password on first run  |
+| `RZGUI_ZEROCOPY`   | `auto`                   | zero-copy raw backend: `auto`/`on`/`off` |
+| `RZGUI_ZEROCOPY_TIMEOUT` | `7200`             | max seconds to build the seek index  |
 
 `RZGUI_IMAGES_DIR` may point either at a single image directory or at a parent
 directory that contains several.
