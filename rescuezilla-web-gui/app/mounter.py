@@ -142,13 +142,21 @@ class Mounter:
         try:
             self._reconstruct(partition, raw)
             source = raw
-            has_key = store.has_bitlocker_key(
-                self.get(mount_id).image_name, partition.name)
-            if partition.is_bitlocker or has_key:
+            image_name = self.get(mount_id).image_name
+            has_key = store.has_bitlocker_key(image_name, partition.name)
+            # Detect BitLocker from the reconstructed image itself (reliable),
+            # not just from blkid metadata which may be absent.
+            bitlocker = (partition.is_bitlocker or has_key
+                         or self._looks_like_bitlocker(raw))
+            if bitlocker:
+                if not has_key:
+                    raise RuntimeError(
+                        "partition is BitLocker-encrypted — add a recovery key "
+                        "under Admin → BitLocker keys, then mount again")
                 self._set(mount_id, message="unlocking BitLocker volume")
                 dis_dir = os.path.join(config.MOUNT_DIR, f"{mount_id}-dislocker")
                 source = self._unlock_bitlocker(
-                    self.get(mount_id).image_name, partition.name, raw, dis_dir)
+                    image_name, partition.name, raw, dis_dir)
                 self._set(mount_id, dislocker_dir=dis_dir)
             os.makedirs(mnt, exist_ok=True)
             self._set(mount_id, message="mounting filesystem")
@@ -168,15 +176,19 @@ class Mounter:
         cat = "cat " + " ".join(shlex.quote(f) for f in partition.image_files)
         decomp_cmd = " ".join(shlex.quote(c) for c in decomp)
 
-        if partition.method == "dd":
-            # Raw dd image: decompressed bytes ARE the filesystem image.
-            pipeline = f"{cat} | {decomp_cmd} > {shlex.quote(raw)}"
-        else:
+        # The filename ("-ptcl-img") is not a reliable indicator: Rescuezilla
+        # writes partitions it can't read (unsupported fs, BitLocker, etc.) as a
+        # RAW dump even though the name still says ptcl. Detect by peeking at the
+        # decompressed header for the partclone magic and branch accordingly.
+        if self._is_partclone_image(partition, decomp_cmd):
             restore = (
                 f"{shlex.quote(config.PARTCLONE_RESTORE)} -C -q -s - "
                 f"-O {shlex.quote(raw)} --restore_raw_file"
             )
             pipeline = f"{cat} | {decomp_cmd} | {restore}"
+        else:
+            # Raw image: the decompressed bytes ARE the (whole-partition) image.
+            pipeline = f"{cat} | {decomp_cmd} > {shlex.quote(raw)}"
 
         proc = subprocess.run(
             ["bash", "-o", "pipefail", "-c", pipeline],
@@ -188,6 +200,31 @@ class Mounter:
             raise RuntimeError(
                 "reconstruction failed:\n" + "\n".join(tail)
             )
+
+    @staticmethod
+    def _looks_like_bitlocker(raw: str) -> bool:
+        """BitLocker volumes carry the '-FVE-FS-' signature at byte offset 3."""
+        try:
+            with open(raw, "rb") as fh:
+                fh.seek(3)
+                return fh.read(8) == b"-FVE-FS-"
+        except OSError:
+            return False
+
+    @staticmethod
+    def _is_partclone_image(partition: Partition, decomp_cmd: str) -> bool:
+        """Peek at the decompressed header; True iff it carries partclone's magic.
+
+        partclone image files begin with the ASCII magic 'partclone-image'. Raw
+        dumps (dd / encrypted volumes) will not contain it in the first block.
+        """
+        first = partition.image_files[0]
+        peek = f"{decomp_cmd} < {shlex.quote(first)} 2>/dev/null | head -c 8192"
+        try:
+            out = subprocess.run(["bash", "-c", peek], capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            return False
+        return b"partclone-image" in out.stdout
 
     def _unlock_bitlocker(self, image_name: str, part: str, raw: str,
                           dis_dir: str) -> str:
@@ -211,8 +248,8 @@ class Mounter:
 
     def _mount_ro(self, raw: str, mnt: str, fstype: str) -> None:
         attempts = [["mount", "-o", "ro,loop", raw, mnt]]
-        # NTFS sometimes needs the ntfs-3g / ntfs3 driver named explicitly.
-        if fstype.lower() in ("ntfs", "ntfs3"):
+        # NTFS (and dd/unknown, often NTFS after dislocker) may need ntfs-3g named.
+        if fstype.lower() in ("ntfs", "ntfs3", "dd", ""):
             attempts.append(["mount", "-t", "ntfs-3g", "-o", "ro,loop", raw, mnt])
         last = None
         for cmd in attempts:
