@@ -10,8 +10,8 @@ large partition can take minutes:
 
 The resulting raw file is a *sparse* full-size filesystem image (only used
 blocks are written), so it consumes roughly the used-data size of the source
-partition. `dd` images skip partclone and are decompressed straight to the raw
-file.
+partition. Raw (non-partclone) images take one of two paths: the zero-copy FUSE
+backend (see zerocopy.py) when available, otherwise a full local decompression.
 
 NOTE: this must run as root (loop mount) on a trusted, dedicated VM. It is not
 safe to expose the HTTP service to untrusted networks.
@@ -22,15 +22,18 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
-from . import config
+from . import config, zerocopy
 from .metadata import DECOMPRESSORS, Partition, parse_image
 from .store import store
+
+_PKG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _STATES = ("pending", "mounting", "mounted", "error", "unmounting", "removed")
 
@@ -47,6 +50,8 @@ class Mount:
     mountpoint: Optional[str] = None
     raw_file: Optional[str] = None
     dislocker_dir: Optional[str] = None
+    fuse_dir: Optional[str] = None
+    _zerocopy_proc: object = None
     created: float = field(default_factory=time.time)
 
 
@@ -138,16 +143,16 @@ class Mounter:
     def _worker(self, mount_id: str, partition: Partition) -> None:
         raw = os.path.join(config.WORK_DIR, f"{mount_id}-{partition.name}.raw")
         mnt = os.path.join(config.MOUNT_DIR, mount_id)
-        self._set(mount_id, state="mounting", raw_file=raw, message="reconstructing filesystem")
+        self._set(mount_id, state="mounting", message="preparing image")
         try:
-            self._reconstruct(partition, raw)
-            source = raw
+            # `source` is the block-image path to mount: a restored/decompressed
+            # raw file, or a zero-copy FUSE-backed file (no local full copy).
+            source = self._prepare_source(mount_id, partition, raw)
             image_name = self.get(mount_id).image_name
             has_key = store.has_bitlocker_key(image_name, partition.name)
-            # Detect BitLocker from the reconstructed image itself (reliable),
-            # not just from blkid metadata which may be absent.
+            # Detect BitLocker from the image itself (reliable), not just blkid.
             bitlocker = (partition.is_bitlocker or has_key
-                         or self._looks_like_bitlocker(raw))
+                         or self._looks_like_bitlocker(source))
             if bitlocker:
                 if not has_key:
                     raise RuntimeError(
@@ -156,7 +161,7 @@ class Mounter:
                 self._set(mount_id, message="unlocking BitLocker volume")
                 dis_dir = os.path.join(config.MOUNT_DIR, f"{mount_id}-dislocker")
                 source = self._unlock_bitlocker(
-                    image_name, partition.name, raw, dis_dir)
+                    image_name, partition.name, source, dis_dir)
                 self._set(mount_id, dislocker_dir=dis_dir)
             os.makedirs(mnt, exist_ok=True)
             self._set(mount_id, message="mounting filesystem")
@@ -164,42 +169,88 @@ class Mounter:
             self._set(mount_id, state="mounted", mountpoint=mnt, message="ready")
         except Exception as exc:  # noqa: BLE001 - surface any failure to the UI
             self._set(mount_id, state="error", message=str(exc))
-            # Best-effort cleanup of a partial raw file.
             try:
-                if os.path.exists(raw):
-                    os.remove(raw)
-            except OSError:
+                self._teardown(self.get(mount_id))  # best-effort partial cleanup
+            except Exception:
                 pass
 
-    def _reconstruct(self, partition: Partition, raw: str) -> None:
-        decomp = DECOMPRESSORS[partition.compressor]
-        cat = "cat " + " ".join(shlex.quote(f) for f in partition.image_files)
-        decomp_cmd = " ".join(shlex.quote(c) for c in decomp)
+    def _prepare_source(self, mount_id: str, partition: Partition, raw: str) -> str:
+        decomp_cmd = " ".join(shlex.quote(c) for c in DECOMPRESSORS[partition.compressor])
 
         # The filename ("-ptcl-img") is not a reliable indicator: Rescuezilla
         # writes partitions it can't read (unsupported fs, BitLocker, etc.) as a
         # RAW dump even though the name still says ptcl. Detect by peeking at the
-        # decompressed header for the partclone magic and branch accordingly.
+        # decompressed header for the partclone magic.
         if self._is_partclone_image(partition, decomp_cmd):
-            restore = (
-                f"{shlex.quote(config.PARTCLONE_RESTORE)} -C -q -s - "
-                f"-O {shlex.quote(raw)} --restore_raw_file"
-            )
-            pipeline = f"{cat} | {decomp_cmd} | {restore}"
-        else:
-            # Raw image: the decompressed bytes ARE the (whole-partition) image.
-            pipeline = f"{cat} | {decomp_cmd} > {shlex.quote(raw)}"
+            self._set(mount_id, raw_file=raw,
+                      message="reconstructing filesystem (partclone)")
+            self._restore_partclone(partition, raw)
+            return raw
 
+        # Raw image. Prefer the zero-copy FUSE backend so a large partition
+        # doesn't need a full local copy; fall back to full decompression.
+        if self._use_zerocopy(partition):
+            fuse_dir = os.path.join(config.MOUNT_DIR, f"{mount_id}-fuse")
+            self._set(mount_id, message="building seek index "
+                      "(zero-copy; large partitions take a while)")
+            image_path, proc = self._start_zerocopy(fuse_dir, partition)
+            self._set(mount_id, fuse_dir=fuse_dir, _zerocopy_proc=proc)
+            return image_path
+
+        self._set(mount_id, raw_file=raw, message="decompressing raw image")
+        cat = "cat " + " ".join(shlex.quote(f) for f in partition.image_files)
+        self._run_pipeline(f"{cat} | {decomp_cmd} > {shlex.quote(raw)}")
+        return raw
+
+    def _restore_partclone(self, partition: Partition, raw: str) -> None:
+        cat = "cat " + " ".join(shlex.quote(f) for f in partition.image_files)
+        decomp_cmd = " ".join(shlex.quote(c) for c in DECOMPRESSORS[partition.compressor])
+        restore = (
+            f"{shlex.quote(config.PARTCLONE_RESTORE)} -C -q -s - "
+            f"-O {shlex.quote(raw)} --restore_raw_file"
+        )
+        self._run_pipeline(f"{cat} | {decomp_cmd} | {restore}")
+
+    @staticmethod
+    def _run_pipeline(pipeline: str) -> None:
         proc = subprocess.run(
             ["bash", "-o", "pipefail", "-c", pipeline],
-            capture_output=True,
-            text=True,
+            capture_output=True, text=True,
         )
         if proc.returncode != 0:
             tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-8:]
-            raise RuntimeError(
-                "reconstruction failed:\n" + "\n".join(tail)
-            )
+            raise RuntimeError("reconstruction failed:\n" + "\n".join(tail))
+
+    @staticmethod
+    def _use_zerocopy(partition: Partition) -> bool:
+        if config.ZEROCOPY in ("0", "off", "false", "no"):
+            return False
+        if not zerocopy.available():
+            return False
+        # Only gzip is randomly seekable via the index; others fall back.
+        return partition.compressor in ("gz",)
+
+    def _start_zerocopy(self, fuse_dir: str, partition: Partition):
+        """Spawn the FUSE server and wait until <fuse_dir>/image is served.
+        Returns (image_path, process)."""
+        os.makedirs(fuse_dir, exist_ok=True)
+        cmd = [sys.executable, "-m", "app.zerocopy", fuse_dir] + partition.image_files
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, cwd=_PKG_ROOT)
+        image_path = os.path.join(fuse_dir, zerocopy.IMAGE_NAME)
+        deadline = time.time() + config.ZEROCOPY_TIMEOUT
+        while time.time() < deadline:
+            if proc.poll() is not None:  # server died during index build
+                err = (proc.stderr.read() or b"").decode(errors="replace")
+                raise RuntimeError("zero-copy mount failed:\n" + err.strip()[-800:])
+            try:
+                if os.path.exists(image_path) and os.path.getsize(image_path) > 0:
+                    return image_path, proc
+            except OSError:
+                pass
+            time.sleep(1)
+        proc.terminate()
+        raise RuntimeError("zero-copy index build timed out")
 
     @staticmethod
     def _looks_like_bitlocker(raw: str) -> bool:
@@ -267,11 +318,28 @@ class Mounter:
                 shutil.rmtree(mount.mountpoint)
             except OSError:
                 pass
-        # Release the dislocker FUSE layer (if BitLocker) before dropping the raw.
+        # Release the dislocker FUSE layer (if BitLocker) before the base image.
         if mount.dislocker_dir and os.path.isdir(mount.dislocker_dir):
             subprocess.run(["umount", mount.dislocker_dir], capture_output=True, text=True)
             try:
                 shutil.rmtree(mount.dislocker_dir)
+            except OSError:
+                pass
+        # Release the zero-copy FUSE mount and stop its server.
+        if mount.fuse_dir and os.path.isdir(mount.fuse_dir):
+            subprocess.run(["umount", mount.fuse_dir], capture_output=True, text=True)
+            proc = mount._zerocopy_proc
+            if proc is not None:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=10)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+            try:
+                shutil.rmtree(mount.fuse_dir)
             except OSError:
                 pass
         if mount.raw_file and os.path.exists(mount.raw_file):
