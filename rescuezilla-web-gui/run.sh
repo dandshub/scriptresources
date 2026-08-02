@@ -15,19 +15,32 @@ fi
 HOST="${RZGUI_HOST:-127.0.0.1}"
 PORT="${RZGUI_PORT:-8000}"
 
-# Prefer a local venv (sudo resets PATH and won't see an activated venv).
-if [[ -x ".venv/bin/python" ]]; then
-  PY=".venv/bin/python"
-elif [[ -x "venv/bin/python" ]]; then
-  PY="venv/bin/python"
-else
-  PY="python3"
-fi
+# Find a Python with uvicorn. sudo resets PATH and won't see an activated venv,
+# so check explicit locations. Order: RZGUI_PYTHON override, an active venv
+# (passed through with `sudo -E`), a venv in this dir, one dir up, then system.
+CANDIDATES=(
+  "${RZGUI_PYTHON:-}"
+  "${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python}"
+  ".venv/bin/python"
+  "venv/bin/python"
+  "../.venv/bin/python"
+  "../venv/bin/python"
+  "python3"
+)
+PY=""
+for c in "${CANDIDATES[@]}"; do
+  [[ -z "$c" ]] && continue
+  if command -v "$c" >/dev/null 2>&1 && "$c" -c "import uvicorn" 2>/dev/null; then
+    PY="$c"
+    break
+  fi
+done
 
-if ! "$PY" -c "import uvicorn" 2>/dev/null; then
-  echo "error: uvicorn not installed for $PY" >&2
-  echo "       run: ${PY%/python}/pip install -r requirements.txt" >&2
-  echo "       (or if using the system python: pip install -r requirements.txt)" >&2
+if [[ -z "$PY" ]]; then
+  echo "error: could not find a Python with uvicorn installed." >&2
+  echo "       activate your venv and run: pip install -r requirements.txt" >&2
+  echo "       then start with:  sudo -E ./run.sh   (preserves the venv)" >&2
+  echo "       or set RZGUI_PYTHON=/path/to/venv/bin/python" >&2
   exit 1
 fi
 
