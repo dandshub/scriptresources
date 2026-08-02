@@ -70,7 +70,26 @@ def test_list_images():
         assert images[0].name == "2026-08-01-img"
 
 
+def test_list_images_nested():
+    # Image buried two levels deep (e.g. /images/casey/host1/<backup>).
+    with tempfile.TemporaryDirectory() as tmp:
+        nested = os.path.join(tmp, "casey", "host1")
+        os.makedirs(nested)
+        _make_image(nested)
+        images = list_images(tmp)
+        assert [i.name for i in images] == ["2026-08-01-img"]
+
+
+def test_list_images_base_is_image():
+    with tempfile.TemporaryDirectory() as tmp:
+        d = _make_image(tmp)
+        images = list_images(d)  # point directly at the backup folder
+        assert len(images) == 1
+
+
 if __name__ == "__main__":
     test_parse_image()
     test_list_images()
+    test_list_images_nested()
+    test_list_images_base_is_image()
     print("ok")
