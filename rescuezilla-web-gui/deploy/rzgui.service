@@ -1,0 +1,19 @@
+[Unit]
+Description=Rescuezilla Web GUI
+# Wait for the network and for remote mounts (e.g. the SMB image share) to be up.
+After=network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# All RZGUI_* settings (paths, admin password, RZGUI_PYTHON) live here:
+EnvironmentFile=/etc/rzgui.conf
+WorkingDirectory=/home/dan/scriptresources/rescuezilla-web-gui
+ExecStart=/home/dan/scriptresources/rescuezilla-web-gui/run.sh
+Restart=on-failure
+RestartSec=5
+# Loop mounts, dislocker and FUSE need root.
+User=root
+
+[Install]
+WantedBy=multi-user.target
