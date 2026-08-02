@@ -66,7 +66,37 @@ def test_random_access_decompression():
         assert gz.read(100) == original[-5:]
 
 
+def test_index_cache_build_and_reuse():
+    if not zerocopy.HAVE_GZIP:
+        print("indexed_gzip not installed; skipping")
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        # Redirect the cache into the temp dir for this test.
+        zerocopy.config.INDEX_CACHE = True
+        zerocopy.config.INDEX_DIR = os.path.join(tmp, "idx")
+        original = os.urandom(3 * 1024 * 1024)
+        chunks = _split_gzip(tmp, original, 512 * 1024)
+
+        idx = zerocopy.index_path_for(chunks)
+        assert not os.path.exists(idx)
+        assert zerocopy.has_cached_index(chunks) is False
+
+        gz, size = zerocopy.open_decompressed(chunks)   # builds + caches
+        assert size == len(original)
+        assert os.path.exists(idx)
+        assert zerocopy.has_cached_index(chunks) is True
+
+        gz2, size2 = zerocopy.open_decompressed(chunks)  # imports cache
+        assert size2 == size
+        off = random.randint(0, len(original) - 1)
+        gz2.seek(off)
+        assert gz2.read(4096) == original[off:off + 4096]
+        # Key is stable across calls.
+        assert zerocopy.index_path_for(chunks) == idx
+
+
 if __name__ == "__main__":
     test_concat_reader()
     test_random_access_decompression()
+    test_index_cache_build_and_reuse()
     print("ok")

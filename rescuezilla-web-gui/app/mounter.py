@@ -191,8 +191,12 @@ class Mounter:
         # doesn't need a full local copy; fall back to full decompression.
         if self._use_zerocopy(partition):
             fuse_dir = os.path.join(config.MOUNT_DIR, f"{mount_id}-fuse")
-            self._set(mount_id, message="building seek index "
-                      "(zero-copy; large partitions take a while)")
+            if zerocopy.has_cached_index(partition.image_files):
+                msg = "loading cached seek index (zero-copy)"
+            else:
+                msg = ("building seek index (zero-copy; first time for this "
+                       "image — large partitions take a while)")
+            self._set(mount_id, message=msg)
             image_path, proc = self._start_zerocopy(fuse_dir, partition)
             self._set(mount_id, fuse_dir=fuse_dir, _zerocopy_proc=proc)
             return image_path

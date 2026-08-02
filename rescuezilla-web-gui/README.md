@@ -59,6 +59,13 @@ spacing (16 MiB) — so it trades local disk for some CPU/latency. Controlled by
 `RZGUI_ZEROCOPY` (`auto` | `on` | `off`); non-gzip images always fall back to a
 full local decompression.
 
+The seek index is **cached** (under `RZGUI_INDEX_DIR`, default
+`$WORK_DIR/index-cache`), keyed by the chunk set's paths/sizes/mtimes, so repeat
+mounts of the same partition skip the rebuild and start in seconds. The index
+file is roughly **0.2% of the decompressed partition size** (≈ 900 MB for a
+~450 GB volume) — far smaller than a full copy, but budget for it on the local
+disk. Disable with `RZGUI_INDEX_CACHE=0`.
+
 ### BitLocker
 
 BitLocker volumes are detected from the reconstructed image's `-FVE-FS-`
@@ -116,6 +123,8 @@ Environment variables:
 | `RZGUI_ADMIN_PASSWORD` | *(random)*           | initial admin password on first run  |
 | `RZGUI_ZEROCOPY`   | `auto`                   | zero-copy raw backend: `auto`/`on`/`off` |
 | `RZGUI_ZEROCOPY_TIMEOUT` | `7200`             | max seconds to build the seek index  |
+| `RZGUI_INDEX_CACHE` | `1`                     | cache the seek index for reuse (`0` to disable) |
+| `RZGUI_INDEX_DIR`  | `$WORK_DIR/index-cache`  | where cached seek indexes are stored |
 
 `RZGUI_IMAGES_DIR` may point either at a single image directory or at a parent
 directory that contains several.

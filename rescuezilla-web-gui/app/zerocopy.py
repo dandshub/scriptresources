@@ -20,9 +20,12 @@ Requires: fusepy, indexed_gzip, and libfuse on the host.
 from __future__ import annotations
 
 import errno
+import hashlib
 import os
 import stat
 import threading
+
+from . import config
 
 try:
     import indexed_gzip
@@ -123,13 +126,58 @@ class ConcatReader:
             self._fh = None
 
 
+def index_path_for(chunks: list[str]) -> str | None:
+    """Deterministic cache path for a chunk set's seek index, or None if caching
+    is disabled. The key includes each chunk's path, size and mtime, so an image
+    that changes on disk gets a fresh index."""
+    if not config.INDEX_CACHE:
+        return None
+    h = hashlib.sha256()
+    for p in chunks:
+        st = os.stat(p)
+        h.update(os.path.abspath(p).encode())
+        h.update(f"{st.st_size}:{int(st.st_mtime)}".encode())
+    return os.path.join(config.INDEX_DIR, h.hexdigest()[:32] + ".gzidx")
+
+
+def has_cached_index(chunks: list[str]) -> bool:
+    try:
+        idx = index_path_for(chunks)
+    except OSError:
+        return False
+    return bool(idx and os.path.exists(idx))
+
+
+def _export_atomic(gz, idx: str) -> None:
+    os.makedirs(os.path.dirname(idx), exist_ok=True)
+    tmp = f"{idx}.tmp.{os.getpid()}"
+    try:
+        gz.export_index(tmp)
+        os.replace(tmp, idx)
+    except Exception:  # noqa: BLE001 - caching is best-effort
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 def open_decompressed(chunks: list[str]):
-    """Return (IndexedGzipFile, uncompressed_size). Building the size reaches EOF,
-    which builds the full seek index in one streaming pass."""
+    """Return (IndexedGzipFile, uncompressed_size). Imports a cached seek index
+    if present; otherwise builds it in one streaming pass and caches it."""
     reader = ConcatReader(chunks)
     gz = indexed_gzip.IndexedGzipFile(fileobj=reader, spacing=_SPACING)
-    # One streaming pass to build the seek index; also gives us the total size.
-    gz.build_full_index()
+    idx = index_path_for(chunks)
+    imported = False
+    if idx and os.path.exists(idx):
+        try:
+            gz.import_index(idx)
+            imported = True
+        except Exception:  # noqa: BLE001 - corrupt/incompatible cache: rebuild
+            imported = False
+    if not imported:
+        gz.build_full_index()
+        if idx:
+            _export_atomic(gz, idx)
     gz.seek(0, os.SEEK_END)
     size = gz.tell()
     gz.seek(0)
