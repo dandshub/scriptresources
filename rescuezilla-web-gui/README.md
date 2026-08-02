@@ -109,6 +109,31 @@ password with `RZGUI_ADMIN_PASSWORD=...`; if you don't, a random one is
 generated and printed to the console. Log in as `admin`, then use the **Admin**
 panel to add users, share images, and store BitLocker keys.
 
+### Running detached / as a service
+
+Mounts and index builds run inside the **server process**, not the browser — so
+you can close the browser (or disconnect) and a long index build keeps going;
+reopen and log back in to check progress and download files. Only the server
+needs to stay up.
+
+- **Quick:** run it inside `tmux`/`screen` and detach (`Ctrl-b d`), so it
+  survives your SSH session closing.
+- **Permanent:** install the systemd unit in `deploy/`:
+  ```
+  sudo cp deploy/rzgui.conf.example /etc/rzgui.conf     # then edit paths/password
+  sudo cp deploy/rzgui.service /etc/systemd/system/rzgui.service
+  sudo systemctl daemon-reload && sudo systemctl enable --now rzgui
+  sudo systemctl status rzgui        # journalctl -u rzgui -f  for logs
+  ```
+  Edit the `WorkingDirectory`/`ExecStart` paths in the unit if your checkout
+  isn't at `/home/dan/scriptresources/rescuezilla-web-gui`. For boot-time start,
+  make sure the SMB image share is in `/etc/fstab` (with `_netdev`) so it's
+  mounted before the service starts.
+
+Note: active mounts are tracked in memory, so restarting the service drops them
+(the reconstructed files/indexes on disk remain; just remount). The index cache
+means a remount after a restart is still fast.
+
 Environment variables:
 
 | var                | default                  | meaning                              |

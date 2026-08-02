@@ -1,0 +1,20 @@
+# Copy to /etc/rzgui.conf and edit. Read by the systemd service (EnvironmentFile).
+# systemd parses KEY=VALUE lines; do not quote values.
+
+# Where the Rescuezilla image directories live (can be an SMB mount).
+RZGUI_IMAGES_DIR=/mnt/dsbh/casey
+
+# Local scratch + mount points (must be local disk, not the SMB share).
+RZGUI_WORK_DIR=/var/lib/rzgui/work
+RZGUI_MOUNT_DIR=/var/lib/rzgui/mnt
+RZGUI_INDEX_DIR=/var/lib/rzgui/index-cache
+
+# Bind address. Keep 127.0.0.1 unless fronted by a reverse proxy / on a trusted LAN.
+RZGUI_HOST=127.0.0.1
+RZGUI_PORT=8000
+
+# Initial admin password (only applied when the user store is first created).
+RZGUI_ADMIN_PASSWORD=ChangeMe123!
+
+# Python interpreter with the app's dependencies installed (your venv).
+RZGUI_PYTHON=/home/dan/scriptresources/.venv/bin/python
