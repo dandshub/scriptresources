@@ -14,4 +14,21 @@ fi
 
 HOST="${RZGUI_HOST:-127.0.0.1}"
 PORT="${RZGUI_PORT:-8000}"
-exec uvicorn app.main:app --host "$HOST" --port "$PORT"
+
+# Prefer a local venv (sudo resets PATH and won't see an activated venv).
+if [[ -x ".venv/bin/python" ]]; then
+  PY=".venv/bin/python"
+elif [[ -x "venv/bin/python" ]]; then
+  PY="venv/bin/python"
+else
+  PY="python3"
+fi
+
+if ! "$PY" -c "import uvicorn" 2>/dev/null; then
+  echo "error: uvicorn not installed for $PY" >&2
+  echo "       run: ${PY%/python}/pip install -r requirements.txt" >&2
+  echo "       (or if using the system python: pip install -r requirements.txt)" >&2
+  exit 1
+fi
+
+exec "$PY" -m uvicorn app.main:app --host "$HOST" --port "$PORT"

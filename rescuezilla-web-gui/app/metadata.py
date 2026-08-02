@@ -188,18 +188,27 @@ def _looks_like_image(path: str) -> bool:
     return any(_IMG_RE.match(e) for e in entries)
 
 
-def list_images(base_dir: str) -> list[ImageInfo]:
-    """Discover image directories directly under base_dir (and base_dir itself)."""
+def list_images(base_dir: str, max_depth: int = 6) -> list[ImageInfo]:
+    """Recursively discover image directories under base_dir (and base_dir
+    itself), up to max_depth levels deep. Descent stops at any directory that
+    looks like an image, so a backup folder's data files aren't re-scanned."""
     images: list[ImageInfo] = []
     base_dir = os.path.abspath(base_dir)
-    if _looks_like_image(base_dir):
-        images.append(parse_image(base_dir))
-    try:
-        entries = sorted(os.listdir(base_dir))
-    except OSError:
-        return images
-    for entry in entries:
-        full = os.path.join(base_dir, entry)
-        if os.path.isdir(full) and _looks_like_image(full):
-            images.append(parse_image(full))
+
+    def walk(directory: str, depth: int) -> None:
+        if _looks_like_image(directory):
+            images.append(parse_image(directory))
+            return  # don't descend into an image's own data files
+        if depth >= max_depth:
+            return
+        try:
+            entries = sorted(os.listdir(directory))
+        except OSError:
+            return  # unreadable (e.g. permissions) — skip silently
+        for entry in entries:
+            full = os.path.join(directory, entry)
+            if os.path.isdir(full) and not os.path.islink(full):
+                walk(full, depth + 1)
+
+    walk(base_dir, 0)
     return images
