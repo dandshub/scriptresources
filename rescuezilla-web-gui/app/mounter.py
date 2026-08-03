@@ -292,7 +292,7 @@ class Mounter:
         # or BEK startup-key file (-f).
         flag = {"recovery": "-p", "password": "-u", "bek": "-f"}.get(
             key["type"], "-p")
-        cmd = ["dislocker-fuse", "-r", "-V", raw, f"{flag}{key['value']}",
+        cmd = [config.DISLOCKER, "-r", "-V", raw, f"{flag}{key['value']}",
                "--", dis_dir]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         decrypted = os.path.join(dis_dir, "dislocker-file")

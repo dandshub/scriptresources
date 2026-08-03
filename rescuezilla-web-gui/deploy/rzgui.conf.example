@@ -18,3 +18,7 @@ RZGUI_ADMIN_PASSWORD=ChangeMe123!
 
 # Python interpreter with the app's dependencies installed (your venv).
 RZGUI_PYTHON=/home/dan/scriptresources/.venv/bin/python
+
+# dislocker-fuse binary. Needed as a git build for used-space-only / EOW
+# BitLocker volumes; leave as the plain name to use the system dislocker.
+RZGUI_DISLOCKER=/home/dan/dislocker-git/src/dislocker-fuse

@@ -73,6 +73,24 @@ signature and unlocked with `dislocker` using a stored key (Admin → BitLocker
 keys). Without a key, the mount fails with a clear message telling you to add
 one.
 
+**Used-space-only / Encrypt-On-Write (EOW) volumes** (the Windows 10/11 default)
+are *not* supported by most distro dislocker packages (0.7.x) or by `cryptsetup`
+— they fail with "Cannot parse volume header" / "EOW information … failed" or
+"encrypt-on-write cannot be activated". Build dislocker from git and point the
+app at it:
+
+```
+sudo apt install -y git cmake gcc make pkg-config libfuse3-dev python3-jinja2 python3-jsonschema
+# mbedtls 3 (Debian/Ubuntu don't ship its CMake config):
+git clone --branch v3.6.2 --depth 1 https://github.com/Mbed-TLS/mbedtls.git ~/mbedtls
+cd ~/mbedtls && git submodule update --init && cmake -DUSE_SHARED_MBEDTLS_LIBRARY=On -DENABLE_TESTING=Off . \
+  && make -j"$(nproc)" && sudo make install && sudo ldconfig
+git clone https://github.com/Aorimn/dislocker.git ~/dislocker-git
+cd ~/dislocker-git && cmake . && make
+# then run the app with:
+export RZGUI_DISLOCKER=$HOME/dislocker-git/src/dislocker-fuse
+```
+
 ## Requirements
 
 System packages (Debian/Ubuntu names):
@@ -150,6 +168,7 @@ Environment variables:
 | `RZGUI_ZEROCOPY_TIMEOUT` | `7200`             | max seconds to build the seek index  |
 | `RZGUI_INDEX_CACHE` | `1`                     | cache the seek index for reuse (`0` to disable) |
 | `RZGUI_INDEX_DIR`  | `$WORK_DIR/index-cache`  | where cached seek indexes are stored |
+| `RZGUI_DISLOCKER`  | `dislocker-fuse`         | dislocker-fuse binary (point at a git build for EOW volumes) |
 
 `RZGUI_IMAGES_DIR` may point either at a single image directory or at a parent
 directory that contains several.
