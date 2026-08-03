@@ -30,3 +30,9 @@ ZEROCOPY_TIMEOUT = int(os.environ.get("RZGUI_ZEROCOPY_TIMEOUT", "7200"))
 INDEX_CACHE = os.environ.get("RZGUI_INDEX_CACHE", "1").lower() not in (
     "0", "off", "false", "no")
 INDEX_DIR = os.environ.get("RZGUI_INDEX_DIR", os.path.join(WORK_DIR, "index-cache"))
+
+# dislocker-fuse binary. BitLocker "used-space-only" / Encrypt-On-Write (EOW)
+# volumes (the Windows 10/11 default) need a newer dislocker than most distros
+# ship — point this at a git build, e.g.
+#   RZGUI_DISLOCKER=/home/dan/dislocker-git/src/dislocker-fuse
+DISLOCKER = os.environ.get("RZGUI_DISLOCKER", "dislocker-fuse")
