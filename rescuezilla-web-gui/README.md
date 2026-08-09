@@ -232,6 +232,9 @@ python3 -m pytest tests/            # or: python3 tests/test_metadata.py
 - BitLocker recovery keys are stored in the JSON store (mode 0600, root-owned).
   Treat that file as a secret; for stricter setups, back it with a real secrets
   manager instead.
-- Mounts are tracked in-process; restarting the server orphans mounts (unmount
-  them manually, or add a startup reconciler).
+- Mounts are tracked in-process, so a restart drops the live mounts — but a
+  **completed reconstruction is kept** (deterministic filename + a `.done`
+  marker), so re-mounting the same partition reuses it instead of rebuilding.
+  Explicit unmount deletes the reconstruction to free space; a partial/aborted
+  one is always dropped.
 - Single-user assumption; no authentication layer is included by design.
