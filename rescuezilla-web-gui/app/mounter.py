@@ -18,6 +18,7 @@ safe to expose the HTTP service to untrusted networks.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import shlex
 import shutil
@@ -118,16 +119,18 @@ class Mounter:
             if not mount:
                 raise ValueError("unknown mount id")
             mount.state = "unmounting"
-        self._teardown(mount)
+        self._teardown(mount, keep_data=False)  # user is done → free the space
         with self._lock:
             mount.state = "removed"
             mount.mountpoint = None
             self._mounts.pop(mount_id, None)
 
     def shutdown(self) -> None:
+        # Release mounts but keep completed reconstructions so a restart reuses
+        # them instead of rebuilding.
         for m in self.list():
             try:
-                self._teardown(m)
+                self._teardown(m, keep_data=True)
             except Exception:
                 pass
 
@@ -141,7 +144,12 @@ class Mounter:
                     setattr(m, k, v)
 
     def _worker(self, mount_id: str, partition: Partition) -> None:
-        raw = os.path.join(config.WORK_DIR, f"{mount_id}-{partition.name}.raw")
+        # Deterministic per (image, partition) so a completed reconstruction can
+        # be reused across restarts / re-mounts instead of rebuilt from scratch.
+        image_path = self.get(mount_id).image_path
+        key = hashlib.sha256(
+            f"{image_path}|{partition.name}".encode()).hexdigest()[:16]
+        raw = os.path.join(config.WORK_DIR, f"{key}-{partition.name}.raw")
         mnt = os.path.join(config.MOUNT_DIR, mount_id)
         self._set(mount_id, state="mounting", message="preparing image")
         try:
@@ -170,7 +178,9 @@ class Mounter:
         except Exception as exc:  # noqa: BLE001 - surface any failure to the UI
             self._set(mount_id, state="error", message=str(exc))
             try:
-                self._teardown(self.get(mount_id))  # best-effort partial cleanup
+                # Keep a completed reconstruction (mount may have failed for an
+                # unrelated reason); a partial one is dropped by _teardown.
+                self._teardown(self.get(mount_id), keep_data=True)
             except Exception:
                 pass
 
@@ -182,10 +192,13 @@ class Mounter:
         # RAW dump even though the name still says ptcl. Detect by peeking at the
         # decompressed header for the partclone magic.
         if self._is_partclone_image(partition, decomp_cmd):
+            if self._reuse_existing(mount_id, raw):
+                return raw
             self._set(mount_id, raw_file=raw,
                       message="reconstructing filesystem (partclone)")
             self._restore_partclone(partition, raw)
             self._pad_to_full_size(raw, partition)
+            self._mark_done(raw)
             return raw
 
         # Raw image. Prefer the zero-copy FUSE backend so a large partition
@@ -202,10 +215,31 @@ class Mounter:
             self._set(mount_id, fuse_dir=fuse_dir, _zerocopy_proc=proc)
             return image_path
 
+        if self._reuse_existing(mount_id, raw):
+            return raw
         self._set(mount_id, raw_file=raw, message="decompressing raw image")
         cat = "cat " + " ".join(shlex.quote(f) for f in partition.image_files)
         self._run_pipeline(f"{cat} | {decomp_cmd} > {shlex.quote(raw)}")
+        self._mark_done(raw)
         return raw
+
+    @staticmethod
+    def _done_marker(raw: str) -> str:
+        return raw + ".done"
+
+    def _reuse_existing(self, mount_id: str, raw: str) -> bool:
+        """True if a completed reconstruction is already on disk (reused as-is)."""
+        if os.path.exists(raw) and os.path.exists(self._done_marker(raw)):
+            self._set(mount_id, raw_file=raw,
+                      message="reusing existing reconstruction")
+            return True
+        return False
+
+    def _mark_done(self, raw: str) -> None:
+        try:
+            open(self._done_marker(raw), "w").close()
+        except OSError:
+            pass
 
     @staticmethod
     def _fs_size_from_boot_sector(raw: str) -> Optional[int]:
@@ -355,7 +389,7 @@ class Mounter:
             last = proc.stderr.strip() or proc.stdout.strip()
         raise RuntimeError(f"mount failed: {last}")
 
-    def _teardown(self, mount: Mount) -> None:
+    def _teardown(self, mount: Mount, keep_data: bool = False) -> None:
         if mount.mountpoint and os.path.ismount(mount.mountpoint):
             subprocess.run(["umount", mount.mountpoint], capture_output=True, text=True)
         if mount.mountpoint and os.path.isdir(mount.mountpoint):
@@ -387,11 +421,16 @@ class Mounter:
                 shutil.rmtree(mount.fuse_dir)
             except OSError:
                 pass
+        # Keep a *completed* reconstruction (has a .done marker) when keep_data is
+        # set — a restart reuses it. Always drop partial/uncompleted ones.
         if mount.raw_file and os.path.exists(mount.raw_file):
-            try:
-                os.remove(mount.raw_file)
-            except OSError:
-                pass
+            complete = os.path.exists(self._done_marker(mount.raw_file))
+            if not (keep_data and complete):
+                for p in (mount.raw_file, self._done_marker(mount.raw_file)):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
 
 
 # Module-level singleton used by the web app.
