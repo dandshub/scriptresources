@@ -185,6 +185,7 @@ class Mounter:
             self._set(mount_id, raw_file=raw,
                       message="reconstructing filesystem (partclone)")
             self._restore_partclone(partition, raw)
+            self._pad_to_full_size(raw, partition)
             return raw
 
         # Raw image. Prefer the zero-copy FUSE backend so a large partition
@@ -205,6 +206,46 @@ class Mounter:
         cat = "cat " + " ".join(shlex.quote(f) for f in partition.image_files)
         self._run_pipeline(f"{cat} | {decomp_cmd} > {shlex.quote(raw)}")
         return raw
+
+    @staticmethod
+    def _fs_size_from_boot_sector(raw: str) -> Optional[int]:
+        """Return the filesystem's declared full size (bytes) from the volume
+        boot sector, for the filesystems the loop-mount cares about. partclone's
+        --restore_raw_file stops at the last used block, so the file can be
+        shorter than the volume; the mount then fails reading the last sector."""
+        import struct
+        try:
+            with open(raw, "rb") as fh:
+                b = fh.read(512)
+        except OSError:
+            return None
+        if len(b) < 512:
+            return None
+        bps = struct.unpack_from("<H", b, 0x0b)[0] or 512
+        # NTFS: total sectors at 0x28 (u64); the backup boot sector sits one
+        # sector past that, so the device must be total+1 sectors.
+        if b[3:7] == b"NTFS":
+            total = struct.unpack_from("<Q", b, 0x28)[0]
+            return (total + 1) * bps if total else None
+        # FAT32: total sectors at 0x20 (u32).
+        if b[0x52:0x57] == b"FAT32":
+            total = struct.unpack_from("<I", b, 0x20)[0]
+            return total * bps if total else None
+        return None
+
+    def _pad_to_full_size(self, raw: str, partition: Partition) -> None:
+        """Extend the reconstructed image (sparsely) to the real volume size so
+        the loop mount sees a device large enough for the filesystem."""
+        target = self._fs_size_from_boot_sector(raw) or partition.size_bytes
+        try:
+            current = os.path.getsize(raw)
+        except OSError:
+            return
+        if target and current < target:
+            try:
+                os.truncate(raw, target)
+            except OSError:
+                pass
 
     def _restore_partclone(self, partition: Partition, raw: str) -> None:
         cat = "cat " + " ".join(shlex.quote(f) for f in partition.image_files)
