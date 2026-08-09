@@ -50,21 +50,58 @@ def resolve_file(root: str, rel: str) -> str:
     return target
 
 
+# Windows/NTFS junk and reparse-point names that bloat or loop a recursive zip.
+_ZIP_SKIP_NAMES = {
+    "$recycle.bin", "system volume information", "pagefile.sys",
+    "hiberfil.sys", "swapfile.sys", "dumpstack.log.tmp",
+}
+
+
 def zip_folder(root: str, rel: str) -> Iterator[bytes]:
-    """Stream a folder as a zip archive without buffering it all in memory."""
-    base = safe_join(root, rel)
+    """Stream a folder as a zip archive without buffering it all in memory.
+
+    Guards against NTFS junctions / reparse points and symlink cycles (common in
+    project trees like node_modules), which would otherwise re-walk or infinitely
+    loop the same content and balloon the archive far past the real folder size.
+    """
+    base = os.path.realpath(safe_join(root, rel))
     if not os.path.isdir(base):
         raise NotADirectoryError(rel or "/")
     arc_root = os.path.basename(base.rstrip(os.sep)) or "root"
 
     import io
 
+    visited = {base}  # real dir paths already walked → break cycles
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
-        for dirpath, _dirs, files in os.walk(base):
+        for dirpath, dirs, files in os.walk(base, followlinks=False):
+            # Prune subdirs we must not descend into: symlinks, junctions that
+            # point outside base, and anything we've already visited (cycles).
+            keep = []
+            for d in dirs:
+                if d.lower() in _ZIP_SKIP_NAMES:
+                    continue
+                dp = os.path.join(dirpath, d)
+                if os.path.islink(dp):
+                    continue
+                rp = os.path.realpath(dp)
+                if rp != base and not rp.startswith(base + os.sep):
+                    continue  # junction/reparse point leaving the tree
+                if rp in visited:
+                    continue
+                visited.add(rp)
+                keep.append(d)
+            dirs[:] = keep
+
             for fn in files:
+                if fn.lower() in _ZIP_SKIP_NAMES:
+                    continue
                 full = os.path.join(dirpath, fn)
-                if not os.path.isfile(full) or os.path.islink(full):
+                if os.path.islink(full) or not os.path.isfile(full):
+                    continue
+                # Skip reparse-point "files" that resolve outside the tree.
+                rp = os.path.realpath(full)
+                if rp != base and not rp.startswith(base + os.sep):
                     continue
                 arcname = os.path.join(arc_root, os.path.relpath(full, base))
                 try:
