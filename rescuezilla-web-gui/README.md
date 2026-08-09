@@ -91,6 +91,19 @@ cd ~/dislocker-git && cmake . && make
 export RZGUI_DISLOCKER=$HOME/dislocker-git/src/dislocker-fuse
 ```
 
+## Quick start
+
+On a fresh Debian/Ubuntu host:
+
+```
+git clone https://github.com/dandshub/scriptresources.git
+cd scriptresources/rescuezilla-web-gui
+./setup.sh          # installs system + Python deps into .venv
+```
+
+`setup.sh` prints the mount + run commands when it finishes. The rest of this
+section documents what it installs and how to run things by hand.
+
 ## Requirements
 
 System packages (Debian/Ubuntu names):
