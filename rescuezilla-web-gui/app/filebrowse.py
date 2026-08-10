@@ -55,14 +55,20 @@ _ZIP_SKIP_NAMES = {
     "$recycle.bin", "system volume information", "pagefile.sys",
     "hiberfil.sys", "swapfile.sys", "dumpstack.log.tmp",
 }
+# Hard backstop against any cycle that dedup somehow misses.
+_ZIP_MAX_DEPTH = 64
 
 
 def zip_folder(root: str, rel: str) -> Iterator[bytes]:
     """Stream a folder as a zip archive without buffering it all in memory.
 
-    Guards against NTFS junctions / reparse points and symlink cycles (common in
-    project trees like node_modules), which would otherwise re-walk or infinitely
-    loop the same content and balloon the archive far past the real folder size.
+    Guards against NTFS junctions / reparse points, hard links and symlink cycles
+    (common in Windows profiles, e.g. Chrome's `User Data` and the self-
+    referential `Application Data` junctions), which would otherwise re-walk or
+    infinitely loop the same content and balloon the archive. Dedup is by
+    filesystem identity (device + inode) — the way tar/du do it — because
+    ntfs-3g often exposes junctions as ordinary directories that `realpath`
+    doesn't resolve.
     """
     base = os.path.realpath(safe_join(root, rel))
     if not os.path.isdir(base):
@@ -71,12 +77,29 @@ def zip_folder(root: str, rel: str) -> Iterator[bytes]:
 
     import io
 
-    visited = {base}  # real dir paths already walked → break cycles
+    def ident(path):
+        try:
+            st = os.stat(path)          # follows the reparse point / hard link
+            return (st.st_dev, st.st_ino)
+        except OSError:
+            return None
+
+    seen_dirs = set()
+    base_id = ident(base)
+    if base_id:
+        seen_dirs.add(base_id)
+    seen_files = set()                  # so a hard-linked file is written once
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
         for dirpath, dirs, files in os.walk(base, followlinks=False):
-            # Prune subdirs we must not descend into: symlinks, junctions that
-            # point outside base, and anything we've already visited (cycles).
+            depth = dirpath[len(base):].count(os.sep)
+            if depth >= _ZIP_MAX_DEPTH:
+                dirs[:] = []
+                continue
+
+            # Prune subdirs: junk, symlinks, and any directory whose identity we
+            # have already walked (a junction/hard link back into the tree).
             keep = []
             for d in dirs:
                 if d.lower() in _ZIP_SKIP_NAMES:
@@ -84,12 +107,10 @@ def zip_folder(root: str, rel: str) -> Iterator[bytes]:
                 dp = os.path.join(dirpath, d)
                 if os.path.islink(dp):
                     continue
-                rp = os.path.realpath(dp)
-                if rp != base and not rp.startswith(base + os.sep):
-                    continue  # junction/reparse point leaving the tree
-                if rp in visited:
-                    continue
-                visited.add(rp)
+                did = ident(dp)
+                if did is None or did in seen_dirs:
+                    continue            # unreadable, or a cycle/duplicate
+                seen_dirs.add(did)
                 keep.append(d)
             dirs[:] = keep
 
@@ -99,10 +120,11 @@ def zip_folder(root: str, rel: str) -> Iterator[bytes]:
                 full = os.path.join(dirpath, fn)
                 if os.path.islink(full) or not os.path.isfile(full):
                     continue
-                # Skip reparse-point "files" that resolve outside the tree.
-                rp = os.path.realpath(full)
-                if rp != base and not rp.startswith(base + os.sep):
-                    continue
+                fid = ident(full)
+                if fid is not None:
+                    if fid in seen_files:
+                        continue        # same file via a hard link — write once
+                    seen_files.add(fid)
                 arcname = os.path.join(arc_root, os.path.relpath(full, base))
                 try:
                     zf.write(full, arcname)
