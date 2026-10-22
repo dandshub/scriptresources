@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2747c9">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Ticket Views Mobile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Base reset (was supplied by the artifact host) */
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+/* Layout: single app column (max 480px), sticky header with view chips, card list, slide-over ticket detail, bottom tab bar */
+:root{
+  --bg:#eef1f6; --surface:#ffffff; --surface-2:#f5f7fb; --fg:#141a26; --muted:#5d6779; --line:#dbe0ea;
+  --accent:#2747c9; --accent-soft:#e3e9fb; --on-accent:#ffffff;
+  --crit:#c62a2f; --crit-soft:#fbe5e5; --warn:#b26a00; --warn-soft:#fdf0d9; --ok:#1f7a4d; --ok-soft:#e1f3e9; --info:#5a49b8; --info-soft:#ece8fb;
+  --sans:"IBM Plex Sans",-apple-system,"Segoe UI",Roboto,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --shadow:0 1px 2px rgba(20,26,38,.06),0 2px 8px rgba(20,26,38,.05);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e121a; --surface:#171d29; --surface-2:#1d2433; --fg:#e7ebf3; --muted:#97a1b4; --line:#2a3345;
+  --accent:#7d97ff; --accent-soft:#232f55; --on-accent:#0e121a;
+  --crit:#ff7b7f; --crit-soft:#3b1d21; --warn:#f0b357; --warn-soft:#3a2a12; --ok:#5fd19a; --ok-soft:#15342a; --info:#b3a6ff; --info-soft:#2a2550;
+  --shadow:none; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e121a; --surface:#171d29; --surface-2:#1d2433; --fg:#e7ebf3; --muted:#97a1b4; --line:#2a3345;
+  --accent:#7d97ff; --accent-soft:#232f55; --on-accent:#0e121a;
+  --crit:#ff7b7f; --crit-soft:#3b1d21; --warn:#f0b357; --warn-soft:#3a2a12; --ok:#5fd19a; --ok-soft:#15342a; --info:#b3a6ff; --info-soft:#2a2550;
+  --shadow:none; color-scheme:dark}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.4;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--surface)}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,.card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{max-width:480px;margin:0 auto;min-height:100%;display:flex;flex-direction:column;background:var(--bg);position:relative}
+.gutter{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+/* header */
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--surface);border-bottom:1px solid var(--line)}
+.bar{display:flex;align-items:center;gap:12px;padding-block:12px 8px}
+.bar h1{font-size:19px;font-weight:700;margin:0;letter-spacing:-.01em;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .sub{display:block;font-size:12px;font-weight:500;color:var(--muted);letter-spacing:0}
+.iconbtn{width:38px;height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);display:grid;place-items:center;flex:none}
+.iconbtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.iconbtn.spin svg{animation:spin .8s linear}
+@keyframes spin{to{transform:rotate(360deg)}}
+.search{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:0 12px;height:40px}
+.search svg{width:16px;height:16px;stroke:var(--muted);fill:none;stroke-width:2;flex:none}
+.search input{border:0;background:transparent;flex:1;min-width:0;font:inherit;color:var(--fg);height:100%;outline:none}
+.chips{display:flex;gap:8px;overflow-x:auto;padding-block:10px 12px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;display:flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:17px;border:1px solid var(--line);background:var(--surface);font-size:13.5px;font-weight:500;white-space:nowrap}
+.chip .n{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.chip[aria-pressed="true"] .n{color:var(--on-accent);opacity:.8}
+
+/* list */
+main{flex:1;padding-block:12px 96px}
+.meta{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);margin-bottom:10px;gap:8px}
+.sample{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--info);background:var(--info-soft);padding:3px 8px;border-radius:6px}
+.sort{border:0;background:transparent;color:var(--muted);font-size:12px;font-weight:500;padding:4px 0}
+.list{display:flex;flex-direction:column;gap:10px}
+.card{position:relative;display:grid;grid-template-columns:1fr auto;gap:6px 12px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px 12px 18px;box-shadow:var(--shadow);text-align:left;width:100%;overflow:hidden}
+.card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--pcol)}
+.card .id{font-family:var(--mono);font-size:12.5px;color:var(--muted);font-weight:500}
+.card .sum{grid-column:1/-1;font-weight:600;font-size:15.5px;line-height:1.3;min-width:0}
+.card .who{grid-column:1/-1;font-size:13px;color:var(--muted);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .row{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:2px}
+.pill{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap}
+.pill.p{font-family:var(--mono);font-weight:600}
+.pill.st{background:var(--surface-2);color:var(--fg);border:1px solid var(--line)}
+.sla{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.sla.crit{background:var(--crit-soft);color:var(--crit)}
+.sla.warn{background:var(--warn-soft);color:var(--warn)}
+.sla.ok{background:var(--ok-soft);color:var(--ok)}
+.sla svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2.2}
+.avatar{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;background:var(--accent-soft);color:var(--accent);flex:none}
+.avatar.none{background:var(--surface-2);color:var(--muted);border:1px dashed var(--line)}
+.card .age{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;align-self:start}
+.empty{text-align:center;color:var(--muted);padding:48px 16px;font-size:14px}
+
+/* tab bar */
+nav.tabs{position:fixed;bottom:0;left:0;right:0;z-index:20;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav.tabs .in{max-width:480px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr)}
+nav.tabs button{border:0;background:transparent;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0 10px;font-size:11px;font-weight:500;color:var(--muted)}
+nav.tabs button[aria-current="page"]{color:var(--accent)}
+nav.tabs svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.badge{font-family:var(--mono);font-size:10px;background:var(--crit);color:var(--surface);border-radius:8px;padding:0 5px;margin-left:2px}
+
+/* detail */
+.detail{position:fixed;inset:0;z-index:40;background:var(--bg);transform:translateX(100%);transition:transform .25s ease;overflow-y:auto;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.detail.open{transform:none}
+@media (prefers-reduced-motion:reduce){.detail{transition:none}.iconbtn.spin svg{animation:none}}
+.detail .wrap{max-width:480px;margin:0 auto;padding-bottom:110px}
+.dhead{position:sticky;top:0;z-index:2;background:var(--surface);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;padding-block:10px}
+.dhead .id{font-family:var(--mono);font-weight:600;flex:1}
+.dtitle{padding-block:16px 4px}
+.dtitle h2{font-size:20px;line-height:1.25;margin:0 0 10px;text-wrap:balance}
+.dtitle .row{display:flex;flex-wrap:wrap;gap:6px}
+.section{margin-top:14px}
+.section h3{font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 8px}
+.kv{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.kv div{display:grid;grid-template-columns:110px 1fr;gap:12px;padding:10px 14px;border-top:1px solid var(--line);font-size:14px}
+.kv div:first-child{border-top:0}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;min-width:0;overflow-wrap:anywhere;font-weight:500}
+.kv dd .copy{border:0;background:transparent;color:var(--accent);font-size:12.5px;font-weight:600;padding:0 0 0 8px}
+.slabar{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:10px}
+.slabar .l{display:flex;justify-content:space-between;font-size:13px;gap:8px}
+.slabar .l span:last-child{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600}
+.track{height:6px;border-radius:3px;background:var(--surface-2);overflow:hidden}
+.track i{display:block;height:100%;border-radius:3px}
+.timeline{display:flex;flex-direction:column;gap:10px}
+.note{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.note.private{background:var(--warn-soft);border-color:transparent}
+.note .h{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);margin-bottom:6px}
+.note .h b{color:var(--fg);font-weight:600}
+.note .h .t{margin-left:auto;font-variant-numeric:tabular-nums}
+.note p{margin:0;font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere}
+.tag{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:1px 6px;border-radius:4px;background:var(--surface-2);color:var(--muted)}
+.actions{position:fixed;bottom:0;left:0;right:0;z-index:3;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+.actions .in{max-width:480px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding-block:10px}
+.btn{height:44px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);font-weight:600;font-size:14px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+
+/* sheet */
+.scrim{position:fixed;inset:0;z-index:50;background:rgba(10,14,22,.45)}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:51;background:var(--surface);border-radius:16px 16px 0 0;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))}
+.sheet .in{max-width:480px;margin:0 auto;padding-block:8px 0}
+.grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:4px auto 12px}
+.sheet h4{margin:0 0 12px;font-size:16px}
+.opt{display:flex;align-items:center;justify-content:space-between;width:100%;height:48px;border:0;border-top:1px solid var(--line);background:transparent;font-size:15px;text-align:left}
+.opt:first-of-type{border-top:0}
+.opt .tick{color:var(--accent);font-weight:700}
+textarea{width:100%;min-height:110px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);color:var(--fg);font:inherit;padding:10px 12px;resize:vertical}
+.toggle{display:flex;align-items:center;gap:8px;font-size:14px;margin:10px 0 14px}
+.sheet .btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:60;background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;font-weight:500;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <div class="bar gutter">
+      <h1 id="viewTitle">My Open Tickets<span class="sub" id="viewSub">Dan S · 2nd Line</span></h1>
+      <button class="iconbtn" id="refresh" aria-label="Refresh tickets"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+    </div>
+    <div class="gutter">
+      <label class="search" for="q"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search ticket, client, user" autocomplete="off"></label>
+    </div>
+    <div class="chips gutter" id="chips" role="toolbar" aria-label="Ticket views"></div>
+  </header>
+
+  <main class="gutter">
+    <div class="meta"><span class="sample">Sample data</span><span id="updated">Updated just now</span><button class="sort" id="sortBtn">Sort: SLA due ▾</button></div>
+    <div class="list" id="list"></div>
+  </main>
+
+  <nav class="tabs" aria-label="Main">
+    <div class="in gutter">
+      <button aria-current="page"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h8"/></svg>Views</button>
+      <button data-soon="Ticket logging"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New</button>
+      <button data-soon="Notifications"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span>Alerts<span class="badge">3</span></span></button>
+      <button data-soon="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Me</button>
+    </div>
+  </nav>
+</div>
+
+<section class="detail" id="detail" aria-hidden="true" aria-label="Ticket detail"></section>
+<div id="layer"></div>
+
+<script>
+const now = Date.now(), M = 60000;
+const AGENTS = {DS:"Dan S", JP:"Jess P", RK:"Ravi K", LM:"Lucy M"};
+const STATUSES = ["New","In Progress","Awaiting Client","Awaiting Supplier","On Hold","Resolved"];
+const PRI = {1:{c:"var(--crit)",bg:"var(--crit-soft)",l:"P1"},2:{c:"var(--warn)",bg:"var(--warn-soft)",l:"P2"},3:{c:"var(--accent)",bg:"var(--accent-soft)",l:"P3"},4:{c:"var(--muted)",bg:"var(--surface-2)",l:"P4"}};
+
+const tickets = [
+ {id:104882,sum:"Whole office can't reach file server",client:"Harlow & Finch Solicitors",site:"Leeds HQ",user:"Priya Shah",phone:"0113 496 0721",email:"priya.shah@harlowfinch.example",type:"Incident",pri:1,status:"In Progress",agent:"DS",team:"2nd Line",opened:-95,due:-12,dueType:"Fix",cat:"Network › File Share",
+  notes:[{by:"Priya Shah",t:-95,txt:"Nobody can open the S: drive since about 8:40. Getting 'network path not found'.",kind:"email"},{by:"Jess P",t:-80,txt:"Confirmed from RMM: FS01 online, SMB service stopped after overnight patching.",kind:"private"},{by:"Dan S",t:-20,txt:"Restarted LanmanServer, drive mapping back for 3 test users. Monitoring before confirming with client.",kind:"note"}]},
+ {id:104879,sum:"New starter laptop build – Tom Reeve (Mon 27th)",client:"Calder Valley Builders",site:"Halifax",user:"Gemma Lord",phone:"01422 555 019",email:"gemma@caldervalley.example",type:"Service Request",pri:3,status:"Awaiting Supplier",agent:"DS",team:"2nd Line",opened:-2880,due:3*1440,dueType:"Fix",cat:"Onboarding",
+  notes:[{by:"Gemma Lord",t:-2880,txt:"Tom starts Monday. Same setup as Sarah please, plus Sage access.",kind:"email"},{by:"Dan S",t:-2500,txt:"Laptop ordered via distributor, ETA Thursday. Licence assigned.",kind:"note"}]},
+ {id:104871,sum:"Outlook keeps asking for password",client:"Brightside Dental Group",site:"Wakefield",user:"Martin Cole",phone:"01924 600 233",email:"m.cole@brightside.example",type:"Incident",pri:3,status:"Awaiting Client",agent:"DS",team:"2nd Line",opened:-1400,due:220,dueType:"Fix",cat:"Microsoft 365 › Outlook",
+  notes:[{by:"Martin Cole",t:-1400,txt:"Prompt pops up every 10 minutes since yesterday.",kind:"email"},{by:"Dan S",t:-300,txt:"Cleared cached creds and reset MFA registration. Asked Martin to confirm after a reboot.",kind:"note"}]},
+ {id:104893,sum:"Printer on 2nd floor jamming",client:"Harlow & Finch Solicitors",site:"Leeds HQ",user:"Ben Ashworth",phone:"0113 496 0700",email:"ben.a@harlowfinch.example",type:"Incident",pri:4,status:"New",agent:null,team:"1st Line",opened:-25,due:35,dueType:"Response",cat:"Hardware › Printer",
+  notes:[{by:"Ben Ashworth",t:-25,txt:"Ricoh on 2nd floor jams on every double-sided job.",kind:"email"}]},
+ {id:104894,sum:"Suspicious email reported – invoice attachment",client:"Northgate Accountancy",site:"York",user:"Helen Ware",phone:"01904 220 118",email:"helen@northgate.example",type:"Incident",pri:2,status:"New",agent:null,team:"Security",opened:-8,due:7,dueType:"Response",cat:"Security › Phishing",
+  notes:[{by:"Helen Ware",t:-8,txt:"Got an invoice from a supplier we don't use. Didn't open it. Forwarded to you.",kind:"email"}]},
+ {id:104860,sum:"Firewall firmware update – scheduled change",client:"Calder Valley Builders",site:"Halifax",user:"Gemma Lord",phone:"01422 555 019",email:"gemma@caldervalley.example",type:"Change",pri:3,status:"On Hold",agent:"RK",team:"Projects",opened:-7200,due:2*1440,dueType:"Fix",cat:"Network › Firewall",
+  notes:[{by:"Ravi K",t:-7000,txt:"Window agreed for Thursday 18:00. CAB approved.",kind:"note"}]},
+ {id:104888,sum:"VPN dropping for remote staff",client:"Brightside Dental Group",site:"Remote",user:"Sana Iqbal",phone:"01924 600 240",email:"s.iqbal@brightside.example",type:"Incident",pri:2,status:"In Progress",agent:"JP",team:"2nd Line",opened:-180,due:45,dueType:"Fix",cat:"Network › VPN",
+  notes:[{by:"Sana Iqbal",t:-180,txt:"VPN disconnects every 20 minutes for me and two others.",kind:"email"},{by:"Jess P",t:-60,txt:"Seeing DPD timeouts on the firewall. Testing an adjusted keepalive.",kind:"private"}]},
+ {id:104885,sum:"Add shared mailbox: bookings@",client:"Northgate Accountancy",site:"York",user:"Helen Ware",phone:"01904 220 118",email:"helen@northgate.example",type:"Service Request",pri:4,status:"In Progress",agent:"DS",team:"2nd Line",opened:-600,due:1300,dueType:"Fix",cat:"Microsoft 365 › Exchange",
+  notes:[{by:"Helen Ware",t:-600,txt:"Can we have a bookings@ mailbox shared with reception and Mark?",kind:"email"}]},
+ {id:104812,sum:"Server room UPS on battery",client:"Harlow & Finch Solicitors",site:"Leeds HQ",user:"Facilities",phone:"0113 496 0799",email:"facilities@harlowfinch.example",type:"Problem",pri:1,status:"Awaiting Supplier",agent:"RK",team:"Projects",opened:-260,due:-40,dueType:"Fix",cat:"Hardware › Power",
+  notes:[{by:"Monitoring",t:-260,txt:"UPS-01 alert: on battery, 64% remaining.",kind:"system"},{by:"Ravi K",t:-200,txt:"Mains restored by building electrician. Battery health failing. Replacement pack ordered.",kind:"note"}]},
+];
+
+const VIEWS = [
+ {id:"mine",name:"My Open Tickets",f:t=>t.agent==="DS"&&t.status!=="Resolved"},
+ {id:"unassigned",name:"Unassigned",f:t=>!t.agent},
+ {id:"breach",name:"SLA at Risk",f:t=>t.due<60&&t.status!=="Resolved"},
+ {id:"awaiting",name:"Awaiting Client",f:t=>t.status==="Awaiting Client"},
+ {id:"p1",name:"P1 / P2",f:t=>t.pri<=2},
+ {id:"all",name:"All Open",f:t=>t.status!=="Resolved"},
+];
+let state = {view:"mine", q:"", sort:"sla", open:null};
+try{const v=localStorage.getItem("tv-view"); if(v&&VIEWS.some(x=>x.id===v)) state.view=v;}catch(e){}
+
+const $ = s=>document.querySelector(s);
+const esc = s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function dur(min){min=Math.abs(Math.round(min)); if(min<60) return min+"m"; if(min<1440) return Math.floor(min/60)+"h "+String(min%60).padStart(2,"0")+"m"; return Math.floor(min/1440)+"d "+Math.floor(min%1440/60)+"h";}
+function ago(min){min=Math.abs(min); if(min<60) return Math.round(min)+"m"; if(min<1440) return Math.round(min/60)+"h"; return Math.round(min/1440)+"d";}
+function slaCls(t){ if(["Awaiting Client","On Hold"].includes(t.status)) return "paused"; return t.due<0?"crit":t.due<60?"warn":"ok"; }
+const clock = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+function slaPill(t){
+  const c=slaCls(t);
+  if(c==="paused") return `<span class="pill st">${clock.replace('<svg','<svg style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2.2"')} SLA paused</span>`;
+  const txt = t.due<0 ? `${t.dueType} breached ${dur(t.due)}` : `${t.dueType} in ${dur(t.due)}`;
+  return `<span class="pill sla ${c}">${clock} ${txt}</span>`;
+}
+function priPill(t){const p=PRI[t.pri]; return `<span class="pill p" style="background:${p.bg};color:${p.c}">${p.l}</span>`;}
+function avatar(a){return a?`<span class="avatar" title="${AGENTS[a]}">${a}</span>`:`<span class="avatar none" title="Unassigned">–</span>`;}
+
+function renderChips(){
+  $("#chips").innerHTML = VIEWS.map(v=>`<button class="chip" aria-pressed="${v.id===state.view}" data-view="${v.id}">${esc(v.name)}<span class="n">${tickets.filter(v.f).length}</span></button>`).join("");
+}
+function renderList(){
+  const v = VIEWS.find(x=>x.id===state.view);
+  $("#viewTitle").firstChild.nodeValue = v.name;
+  const q = state.q.trim().toLowerCase();
+  let rows = tickets.filter(v.f).filter(t=>!q||[t.id,t.sum,t.client,t.user,t.cat].join(" ").toLowerCase().includes(q));
+  rows.sort(state.sort==="sla"?(a,b)=>a.due-b.due : state.sort==="pri"?(a,b)=>a.pri-b.pri||a.due-b.due : (a,b)=>b.opened-a.opened);
+  $("#list").innerHTML = rows.length ? rows.map(t=>`
+    <button class="card" data-id="${t.id}" style="--pcol:${PRI[t.pri].c}">
+      <span class="id">#${t.id} · ${esc(t.type)}</span><span class="age">${ago(t.opened)} old</span>
+      <span class="sum">${esc(t.sum)}</span>
+      <span class="who">${esc(t.client)} · ${esc(t.user)}</span>
+      <span class="row">${priPill(t)}${slaPill(t)}<span class="pill st">${esc(t.status)}</span><span style="margin-left:auto">${avatar(t.agent)}</span></span>
+    </button>`).join("") : `<div class="empty">No tickets in this view${q?" match “"+esc(state.q)+"”":""}.</div>`;
+}
+function render(){renderChips(); renderList(); if(state.open) renderDetail();}
+
+function renderDetail(){
+  const t = tickets.find(x=>x.id===state.open); if(!t) return;
+  const total = t.due - t.opened, used = -t.opened, pct = Math.max(4,Math.min(100, used/total*100));
+  const c = slaCls(t), col = c==="crit"?"var(--crit)":c==="warn"?"var(--warn)":c==="ok"?"var(--ok)":"var(--muted)";
+  const kind = {email:"Email",private:"Private",note:"Note",system:"Alert"};
+  $("#detail").innerHTML = `<div class="wrap">
+    <div class="dhead gutter"><button class="iconbtn" id="back" aria-label="Back to list"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button><span class="id">#${t.id}</span>${avatar(t.agent)}</div>
+    <div class="gutter">
+      <div class="dtitle"><h2>${esc(t.sum)}</h2><div class="row">${priPill(t)}${slaPill(t)}<span class="pill st">${esc(t.status)}</span></div></div>
+      <div class="section"><h3>SLA</h3><div class="slabar">
+        <div class="l"><span>${t.dueType} target</span><span style="color:${col}">${c==="paused"?"Paused":t.due<0?"−"+dur(t.due):dur(t.due)+" left"}</span></div>
+        <div class="track"><i style="width:${pct}%;background:${col}"></i></div>
+        <div class="l" style="color:var(--muted)"><span>Logged ${ago(t.opened)} ago</span><span style="font-weight:500">${esc(t.team)}</span></div>
+      </div></div>
+      <div class="section"><h3>Contact</h3><dl class="kv">
+        <div><dt>Client</dt><dd>${esc(t.client)}</dd></div>
+        <div><dt>Site</dt><dd>${esc(t.site)}</dd></div>
+        <div><dt>User</dt><dd>${esc(t.user)}</dd></div>
+        <div><dt>Phone</dt><dd>${esc(t.phone)}<button class="copy" data-copy="${esc(t.phone)}">Copy</button></dd></div>
+        <div><dt>Email</dt><dd>${esc(t.email)}<button class="copy" data-copy="${esc(t.email)}">Copy</button></dd></div>
+      </dl></div>
+      <div class="section"><h3>Details</h3><dl class="kv">
+        <div><dt>Type</dt><dd>${esc(t.type)}</dd></div>
+        <div><dt>Category</dt><dd>${esc(t.cat)}</dd></div>
+        <div><dt>Agent</dt><dd>${t.agent?AGENTS[t.agent]:"Unassigned"}</dd></div>
+      </dl></div>
+      <div class="section"><h3>Timeline · ${t.notes.length}</h3><div class="timeline">
+        ${t.notes.slice().reverse().map(n=>`<div class="note ${n.kind==="private"?"private":""}"><div class="h"><b>${esc(n.by)}</b><span class="tag">${kind[n.kind]}</span><span class="t">${ago(n.t)} ago</span></div><p>${esc(n.txt)}</p></div>`).join("")}
+      </div></div>
+    </div>
+    <div class="actions"><div class="in gutter">
+      <button class="btn" id="aStatus">Status</button>
+      <button class="btn" id="aAssign">${t.agent==="DS"?"Reassign":"Take it"}</button>
+      <button class="btn primary" id="aNote">Add note</button>
+    </div></div>
+  </div>`;
+}
+
+function openTicket(id){state.open=id; renderDetail(); const d=$("#detail"); d.classList.add("open"); d.setAttribute("aria-hidden","false"); d.scrollTop=0; setTimeout(()=>$("#back")?.focus(),50);}
+function closeTicket(){const d=$("#detail"); d.classList.remove("open"); d.setAttribute("aria-hidden","true"); const id=state.open; state.open=null; renderList(); document.querySelector(`.card[data-id="${id}"]`)?.focus();}
+
+let toastT;
+function toast(msg){clearTimeout(toastT); $("#layer").querySelector(".toast")?.remove(); const el=document.createElement("div"); el.className="toast"; el.textContent=msg; $("#layer").appendChild(el); toastT=setTimeout(()=>el.remove(),2200);}
+function sheet(html){$("#layer").innerHTML=`<div class="scrim" data-close></div><div class="sheet" role="dialog" aria-modal="true"><div class="in gutter"><div class="grab"></div>${html}</div></div>`; $("#layer").querySelector(".sheet button, .sheet textarea")?.focus();}
+function closeSheet(){$("#layer").innerHTML="";}
+
+document.addEventListener("click", e=>{
+  const el = e.target.closest("button,[data-close]"); if(!el) return;
+  if(el.dataset.view){state.view=el.dataset.view; try{localStorage.setItem("tv-view",state.view)}catch(_){ } render(); window.scrollTo({top:0}); return;}
+  if(el.classList.contains("card")) return openTicket(+el.dataset.id);
+  if(el.id==="back") return closeTicket();
+  if(el.dataset.close!==undefined) return closeSheet();
+  if(el.dataset.copy){navigator.clipboard?.writeText(el.dataset.copy).then(()=>toast("Copied "+el.dataset.copy),()=>toast(el.dataset.copy)); return;}
+  if(el.dataset.soon) return toast(el.dataset.soon+" isn't in the mock yet");
+  const t = tickets.find(x=>x.id===state.open);
+  if(el.id==="refresh"){el.classList.remove("spin"); void el.offsetWidth; el.classList.add("spin"); $("#updated").textContent="Updated just now"; return;}
+  if(el.id==="sortBtn"){sheet(`<h4>Sort tickets</h4>${[["sla","SLA due"],["pri","Priority"],["new","Newest first"]].map(([k,l])=>`<button class="opt" data-sort="${k}">${l}${state.sort===k?'<span class="tick">✓</span>':""}</button>`).join("")}`); return;}
+  if(el.dataset.sort){state.sort=el.dataset.sort; $("#sortBtn").textContent="Sort: "+el.textContent.replace("✓","")+" ▾"; closeSheet(); renderList(); return;}
+  if(el.id==="aStatus"){sheet(`<h4>Change status</h4>${STATUSES.map(s=>`<button class="opt" data-status="${s}">${s}${t.status===s?'<span class="tick">✓</span>':""}</button>`).join("")}`); return;}
+  if(el.dataset.status){t.status=el.dataset.status; t.notes.push({by:"Dan S",t:0,txt:"Status changed to "+t.status,kind:"system"}); closeSheet(); render(); toast("Status set to "+t.status); return;}
+  if(el.id==="aAssign"){ if(t.agent!=="DS"){t.agent="DS"; render(); toast("Assigned to you"); return;}
+    sheet(`<h4>Reassign to</h4>${Object.entries(AGENTS).map(([k,n])=>`<button class="opt" data-agent="${k}">${n}${t.agent===k?'<span class="tick">✓</span>':""}</button>`).join("")}`); return;}
+  if(el.dataset.agent){t.agent=el.dataset.agent; closeSheet(); render(); toast("Assigned to "+AGENTS[t.agent]); return;}
+  if(el.id==="aNote"){sheet(`<h4>Add note to #${t.id}</h4><textarea id="noteText" placeholder="What did you do?"></textarea><label class="toggle"><input type="checkbox" id="notePrivate"> Private note (hide from client)</label><div class="btns"><button class="btn" data-close>Cancel</button><button class="btn primary" id="saveNote">Save note</button></div>`); return;}
+  if(el.id==="saveNote"){const txt=$("#noteText").value.trim(); if(!txt){$("#noteText").focus(); toast("Type a note first"); return;}
+    t.notes.push({by:"Dan S",t:0,txt,kind:$("#notePrivate").checked?"private":"note"}); closeSheet(); renderDetail(); toast("Note saved (mock only)"); return;}
+});
+$("#q").addEventListener("input", e=>{state.q=e.target.value; renderList();});
+document.addEventListener("keydown", e=>{ if(e.key!=="Escape") return; if($("#layer").innerHTML) closeSheet(); else if(state.open) closeTicket(); });
+let mins=0; setInterval(()=>{mins++; $("#updated").textContent=`Updated ${mins}m ago`;},60000);
+render();
+</script>
+</body>
+</html>
