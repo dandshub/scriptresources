@@ -5,7 +5,7 @@ import datetime as dt
 import logging
 import threading
 
-from . import config, engine
+from . import config, engine, ninjaone
 from .db import DB, now
 
 log = logging.getLogger("macstate.scheduler")
@@ -38,6 +38,12 @@ def tick(db: DB, when: dt.datetime | None = None) -> None:
         n = run_schedule(db, s)
         db.run("UPDATE schedules SET last_run=? WHERE id=?", (when.strftime("%Y-%m-%d"), s["id"]))
         log.info("schedule %s queued %d session(s)", s["name"], n)
+
+    if ninjaone.sync_due(db):
+        try:
+            ninjaone.sync(db)
+        except Exception as e:  # recorded in settings by sync()
+            log.warning("NinjaOne sync failed: %s", e)
 
     cutoff = now() - config.SESSION_TIMEOUT
     for s in db.all("SELECT * FROM sessions WHERE status='running' AND COALESCE(updated_at,started_at) < ?",

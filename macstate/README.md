@@ -120,6 +120,63 @@ sudo "$A" uninstall    # remove agent, config and LaunchDaemon
 "$A" version
 ```
 
+## NinjaOne integration
+
+MacState can sit alongside NinjaOne, much like ImmyBot's NinjaOne integration.
+NinjaOne stays your RMM/MDM, and MacState handles desired-state software and
+configuration.
+
+* **Sync** runs hourly and from **NinjaOne › Sync now**.
+  * NinjaOne organizations link to MacState tenants. They link automatically
+    when the names match, or you can pick a tenant or create one per
+    organization.
+  * NinjaOne Macs (node class `MAC`) are matched to MacState computers by
+    serial number.
+  * Linked Macs show an **N1** badge and a link to their NinjaOne device page.
+* **Enrollment keys in NinjaOne:** each linked tenant's key is written to an
+  organization custom field (default `macstateEnrollmentKey`).
+* **Agent rollout through NinjaOne:**
+  * Download the install script from the NinjaOne page and add it to the
+    NinjaOne Automation Library (macOS shell script, run as System).
+  * The script reads the key from the custom field, so a single NinjaOne policy
+    can install MacState on every Mac in every client. It does nothing on Macs
+    that already have the agent.
+  * The **Deploy** buttons run that script immediately, through the NinjaOne API,
+    on Macs that don't have the agent yet.
+
+### Setup
+
+1. In NinjaOne, go to **Administration › Apps › API › Client App IDs › Add**.
+   Choose the platform **API Services (machine-to-machine)**, the scopes
+   **Monitoring** and **Management**, and the grant type **Client Credentials**.
+2. Create an **organization** custom field of type text named
+   `macstateEnrollmentKey`. Give it API read/write access and script read access.
+3. In MacState, open **NinjaOne › Configure**. Choose your instance (US, US2, EU,
+   CA, OC, or a custom URL), enter the client ID and secret, then click **Test
+   connection** and **Sync now**.
+4. Download the install script, add it to NinjaOne, and enter its script ID in
+   **Configure**. Then either:
+   * attach the script to your macOS policy (for example, on agent install
+     plus daily), or
+   * use **Deploy to all missing** for a one-off rollout.
+
+Notes:
+
+* The NinjaOne client secret is stored in the MacState database. Protect the
+  database file.
+* The NinjaOne scripting API needs the NinjaOne agent on the Mac. If a Mac is
+  enrolled only in NinjaOne MDM, with no NinjaOne agent, install MacState with
+  the command from the **Tenants** page instead, through your MDM's script or
+  package support.
+* The NinjaOne API calls used are:
+  * `POST /ws/oauth/token`
+  * `GET /v2/organizations`
+  * `GET /v2/devices-detailed?df=class in (MAC)`
+  * `PATCH /v2/organization/{id}/custom-fields`
+  * `POST /v2/device/{id}/script/run`
+* If your NinjaOne app needs a different scope for scripting (for example,
+  `control`), add it under **OAuth scopes** in **Configure**.
+
 ## How the agent applies software
 
 For each software action:

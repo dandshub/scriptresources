@@ -177,6 +177,26 @@ CREATE TABLE IF NOT EXISTS session_logs (
 );
 CREATE INDEX IF NOT EXISTS ix_logs_session ON session_logs(session_id);
 
+-- NinjaOne mirror (rebuilt on every sync).
+CREATE TABLE IF NOT EXISTS ninja_orgs (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    synced_at   INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ninja_devices (
+    id              INTEGER PRIMARY KEY,
+    organization_id INTEGER,
+    name            TEXT NOT NULL,
+    serial          TEXT NOT NULL DEFAULT '',
+    node_class      TEXT NOT NULL DEFAULT '',
+    os_name         TEXT NOT NULL DEFAULT '',
+    offline         INTEGER NOT NULL DEFAULT 0,
+    last_contact    INTEGER,
+    computer_id     INTEGER,
+    synced_at       INTEGER NOT NULL
+);
+
 -- Last known state of each deployed item on each computer.
 CREATE TABLE IF NOT EXISTS computer_state (
     computer_id INTEGER NOT NULL REFERENCES computers(id) ON DELETE CASCADE,
@@ -211,6 +231,20 @@ class DB:
             self.conn.execute("PRAGMA foreign_keys = ON")
             self.conn.execute("PRAGMA journal_mode = WAL")
             self.conn.executescript(SCHEMA)
+            self._migrate()
+
+    # Columns added after the first release; ALTER TABLE for existing databases.
+    _COLUMNS = {
+        "tenants": {"ninja_org_id": "INTEGER"},
+        "computers": {"ninja_device_id": "INTEGER"},
+    }
+
+    def _migrate(self) -> None:
+        for table, cols in self._COLUMNS.items():
+            have = {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+            for col, decl in cols.items():
+                if col not in have:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
 
     def all(self, sql: str, args: tuple | list = ()) -> list[dict]:
         with self.lock:

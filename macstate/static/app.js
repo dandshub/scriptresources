@@ -234,6 +234,7 @@ const routes = {
   schedules: pageSchedules,
   sessions: pageSessions,
   settings: pageSettings,
+  ninjaone: pageNinja,
 };
 
 async function route() {
@@ -316,7 +317,8 @@ async function pageComputers(main, id) {
     const f = filter.toLowerCase();
     const shown = rows.filter(r => !f || [r.name, r.serial, r.model, r.console_user, r.tags].join(" ").toLowerCase().includes(f));
     body.replaceChildren(table([
-      ["Name", r => h("span", {}, h("span", { class: `dot ${r.online ? "on" : ""}`, title: r.online ? "online" : "offline" }), r.name)],
+      ["Name", r => h("span", {}, h("span", { class: `dot ${r.online ? "on" : ""}`, title: r.online ? "online" : "offline" }), r.name,
+        r.ninja_device_id ? [" ", h("span", { class: "badge info", title: "Linked to NinjaOne" }, "N1")] : "")],
       ["Tenant", r => r.tenant_name],
       ["User", r => r.console_user || "—"],
       ["OS", r => r.os_version],
@@ -385,7 +387,9 @@ async function pageComputer(main, id) {
           async () => { await api("DELETE", `/api/computers/${id}`); location.hash = "#/computers"; }), "danger") : ""),
       h("p", { class: "muted" }, [c.tenant_name, c.model, c.os_version, c.console_user && `user ${c.console_user}`,
         `last seen ${ago(c.last_seen)}`, c.tags.length && `tags: ${c.tags.map(t => t.name).join(", ")}`]
-        .filter(Boolean).join(" · ")),
+        .filter(Boolean).join(" · "),
+        c.ninja ? [" · ", h("a", { href: c.ninja.url, target: "_blank", rel: "noopener" },
+          `NinjaOne: ${c.ninja.name}${c.ninja.offline ? " (offline)" : ""} ↗`)] : ""),
       tabs, content);
   };
   const queue = async mode => {
@@ -458,7 +462,8 @@ async function pageTenants(main) {
             async () => { await api("DELETE", `/api/tenants/${t.id}`); route(); }), "danger") : "")),
       h("label", {}, "Install command", copyBox(t.install_command)),
       h("p", { class: "muted" }, t.onboarding_enabled ? "Onboarding: new Macs run a full maintenance session on enrollment."
-        : "Onboarding disabled.", t.notes ? ` · ${t.notes}` : ""))));
+        : "Onboarding disabled.", t.ninja_org_name ? ` · NinjaOne organization: ${t.ninja_org_name}` : "",
+        t.notes ? ` · ${t.notes}` : ""))));
 }
 
 function editTenant(t) {
@@ -758,6 +763,141 @@ async function pageSession(main, id) {
   };
   await render();
   autoRefresh(render, 3000);
+}
+
+// NinjaOne -------------------------------------------------------------------
+
+async function pageNinja(main) {
+  const admin = ME.role === "admin";
+  const [cfg, orgs, devices, tenants] = await Promise.all([
+    admin ? api("GET", "/api/ninjaone") : null, api("GET", "/api/ninjaone/orgs"),
+    api("GET", "/api/ninjaone/devices"), api("GET", "/api/tenants")]);
+  const missing = devices.filter(d => !d.computer_id && d.tenant_name);
+  const unlinked = devices.filter(d => !d.computer_id && !d.tenant_name).length;
+  const selected = new Set();
+
+  const sync = async () => {
+    const r = await act(() => api("POST", "/api/ninjaone/sync"));
+    toast(`Synced ${r.organizations} org(s), ${r.devices} Mac(s); ${r.devices_matched} matched, ${r.keys_pushed} key(s) pushed`
+      + (r.warnings.length ? ` — ${r.warnings.length} warning(s)` : ""), r.warnings.length > 0);
+    route();
+  };
+  const deploy = async body => {
+    const r = await act(() => api("POST", "/api/ninjaone/deploy", body));
+    openModal("Agent deployment via NinjaOne", h("div", {},
+      h("p", {}, `Queued on ${r.queued.length} device(s). NinjaOne runs the script when each Mac is online; `,
+        "it appears under Computers once it enrolls."),
+      r.errors.length ? [h("h2", {}, "Errors"), table([["Device", e => e.name || e.device_id], ["Error", e => e.error]], r.errors)] : ""),
+      h("div", { class: "modal-foot" }, btn("Close", closeModal)));
+  };
+  const downloadScript = async () => {
+    const text = await api("GET", "/api/ninjaone/script");
+    const a = h("a", { href: URL.createObjectURL(new Blob([text], { type: "text/x-shellscript" })),
+      download: "ninjaone-install-macstate.sh" });
+    document.body.append(a); a.click(); a.remove();
+  };
+
+  const settingsCard = admin ? h("div", { class: "card" }, h("h2", {}, "Connection"),
+    h("dl", { class: "kv" },
+      h("dt", {}, "Status"), h("dd", {}, cfg.configured ? badge("compliant", "configured") : badge("skipped", "not configured")),
+      h("dt", {}, "Instance"), h("dd", {}, cfg.base_url),
+      h("dt", {}, "Last sync"), h("dd", {}, cfg.last_sync ? fmtTime(Number(cfg.last_sync)) : "never"),
+      cfg.last_sync_error ? [h("dt", {}, "Last problem"), h("dd", { class: "error" }, cfg.last_sync_error)] : ""),
+    h("div", { class: "actions", style: "margin-top:12px" },
+      btn("Configure", () => editNinja(cfg), "primary"),
+      cfg.configured ? btn("Test connection", async () => {
+        const r = await act(() => api("POST", "/api/ninjaone/test"));
+        toast(`Connected — ${r.organizations} organization(s) visible`);
+      }) : "",
+      cfg.configured ? btn("Sync now", sync) : "",
+      btn("Download install script", downloadScript))) : "";
+
+  const orgCard = h("div", { class: "card" }, h("h2", {}, `Organizations (${orgs.length})`),
+    h("p", { class: "muted" }, "Each NinjaOne organization maps to a MacState tenant. Linked tenants get their enrollment key ",
+      "written to the organization custom field ", h("code", {}, cfg?.custom_field || "macstateEnrollmentKey"), "."),
+    table([
+      ["NinjaOne organization", r => r.name],
+      ["Macs", r => `${r.agent_count}/${r.device_count} with agent`],
+      ["MacState tenant", r => admin ? h("select", { onchange: async e => {
+        const v = e.target.value;
+        await act(() => api("PUT", `/api/ninjaone/orgs/${r.id}/link`,
+          v === "__new" ? { create: true } : { tenant_id: v ? Number(v) : null }), "Link saved");
+        route();
+      } }, h("option", { value: "" }, "— not linked —"),
+        tenants.map(t => h("option", { value: t.id, selected: t.id === r.tenant_id }, t.name)),
+        h("option", { value: "__new" }, `+ Create tenant “${r.name}”`)) : (r.tenant_name || "—")],
+    ], orgs));
+
+  const devBody = h("div");
+  const drawDevices = () => devBody.replaceChildren(table([
+    ["", r => !r.computer_id && admin ? h("input", { type: "checkbox", checked: selected.has(r.id),
+      onchange: e => { e.target.checked ? selected.add(r.id) : selected.delete(r.id); } }) : ""],
+    ["Mac", r => h("a", { href: r.url, target: "_blank", rel: "noopener" }, r.name, " ↗")],
+    ["Organization", r => r.org_name || r.organization_id],
+    ["Serial", r => h("code", {}, r.serial || "—")],
+    ["OS", r => r.os_name || "—"],
+    ["NinjaOne", r => r.offline ? badge("skipped", "offline") : badge("compliant", "online")],
+    ["MacState agent", r => r.computer_id
+      ? h("a", { href: `#/computers/${r.computer_id}` }, badge("compliant", "installed"), " ", r.computer_name)
+      : r.tenant_name ? badge("failed", "missing") : badge("skipped", "org not linked")],
+  ], devices));
+  drawDevices();
+
+  main.replaceChildren(
+    pageHead("NinjaOne", !admin && orgs.length ? btn("Sync now", sync) : ""),
+    h("p", { class: "muted" }, "Sync organizations and Macs from NinjaOne, match them to MacState by serial number, and roll the ",
+      "MacState agent out through NinjaOne scripting."),
+    h("div", { class: "grid" }, settingsCard, admin ? setupCard(cfg) : ""),
+    orgCard,
+    h("div", { class: "card" }, h("div", { class: "page-head" },
+      h("h1", { style: "font-size:15px" }, `Macs in NinjaOne (${devices.length}) · ${missing.length} ready to deploy`
+        + (unlinked ? ` · ${unlinked} in unlinked orgs` : "")),
+      admin ? h("div", { class: "actions" },
+        btn("Deploy to selected", () => selected.size ? deploy({ device_ids: [...selected] }) : toast("Select Macs first", true)),
+        missing.length ? btn(`Deploy to all ${missing.length} missing`, () => confirmModal("Deploy MacState agent",
+          `Run the install script through NinjaOne on ${missing.length} Mac(s)?`, () => deploy({ all_missing: true }), "Deploy"), "primary") : "")
+        : ""),
+      devBody));
+}
+
+function setupCard(cfg) {
+  const step = (n, ...body) => h("li", { style: "margin-bottom:8px" }, ...body);
+  return h("div", { class: "card" }, h("h2", {}, "Setup"), h("ol", { style: "margin:0;padding-left:18px" },
+    step(1, "In NinjaOne: Administration › Apps › API › Client App IDs › Add. Platform ",
+      h("b", {}, "API Services (machine-to-machine)"), ", scopes Monitoring + Management, grant type Client Credentials."),
+    step(2, "Create an ", h("b", {}, "organization"), " custom field (text) named ", h("code", {}, cfg.custom_field),
+      " with API read/write and script read access."),
+    step(3, "Download the install script and add it to the NinjaOne Automation Library as a macOS shell script, run as System. ",
+      "Put its script ID in Configure."),
+    step(4, "Run it from a NinjaOne policy for Macs (e.g. at agent install + daily) for hands-off rollout, ",
+      "or use the Deploy buttons below.")));
+}
+
+function editNinja(cfg) {
+  const regions = Object.entries(cfg.regions);
+  const isCustom = !cfg.regions[cfg.base_url];
+  formModal("NinjaOne connection", [
+    { name: "region", label: "Instance", type: "select", options: [...regions, ["custom", "Other URL…"]] },
+    { name: "base_url", label: "Instance URL", show: v => v.region === "custom", placeholder: "https://example.rmmservice.eu" },
+    { name: "client_id", label: "Client ID" },
+    { name: "client_secret", label: cfg.client_secret_set ? "Client secret (leave blank to keep current)" : "Client secret",
+      type: "password" },
+    { name: "scope", label: "OAuth scopes", hint: "Space-separated; must match the scopes enabled on the client app." },
+    { name: "custom_field", label: "Organization custom field for enrollment key" },
+    { name: "push_keys", label: "Write tenant enrollment keys to that custom field on sync", type: "checkbox" },
+    { name: "auto_create_tenants", label: "Create a MacState tenant for every unlinked NinjaOne organization", type: "checkbox" },
+    { name: "device_classes", label: "NinjaOne device classes to sync", hint: "Comma-separated NinjaOne node classes. Macs are MAC." },
+    { name: "script_id", label: "NinjaOne script ID of the MacState install script", placeholder: "e.g. 142" },
+    { name: "run_as", label: "Run script as", hint: "system (recommended), loggedonuser, or a NinjaOne credential ID." },
+    { name: "sync_interval", label: "Automatic sync interval (seconds, 0 = off)" },
+  ], { ...cfg, region: isCustom ? "custom" : cfg.base_url, client_secret: "",
+       push_keys: cfg.push_keys === "1", auto_create_tenants: cfg.auto_create_tenants === "1" }, async v => {
+    const body = { ...v, base_url: v.region === "custom" ? v.base_url : v.region };
+    delete body.region;
+    await api("PUT", "/api/ninjaone", body);
+    toast("NinjaOne settings saved");
+    route();
+  });
 }
 
 // Settings -------------------------------------------------------------------

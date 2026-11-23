@@ -12,12 +12,14 @@ from functools import cmp_to_key
 from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+import shlex
+
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import agent_api, config, engine, scheduler
+from . import agent_api, config, engine, ninjaone, scheduler
 from .db import db, dumps, now
 from .security import hash_password, new_enrollment_key, verify_password
 from .seed import bootstrap
@@ -193,8 +195,8 @@ class TenantIn(BaseModel):
 @app.get("/api/tenants")
 def list_tenants(request: Request, _: dict = Depends(current_user)) -> list[dict]:
     rows = db.all(
-        "SELECT t.*, (SELECT COUNT(*) FROM computers c WHERE c.tenant_id=t.id) AS computer_count "
-        "FROM tenants t ORDER BY t.name")
+        "SELECT t.*, (SELECT COUNT(*) FROM computers c WHERE c.tenant_id=t.id) AS computer_count, "
+        "o.name AS ninja_org_name FROM tenants t LEFT JOIN ninja_orgs o ON o.id=t.ninja_org_id ORDER BY t.name")
     base = agent_api.public_url(request)
     for r in rows:
         r["install_command"] = (f"curl -fsSL '{base}/agent/install.sh?key={r['enrollment_key']}' "
@@ -266,7 +268,7 @@ def _online(c: dict) -> bool:
 @app.get("/api/computers")
 def list_computers(tenant_id: Optional[int] = None, _: dict = Depends(current_user)) -> list[dict]:
     sql = ("SELECT c.id,c.name,c.serial,c.model,c.os_version,c.arch,c.agent_version,c.console_user,"
-           "c.last_seen,c.onboarded,c.tenant_id,t.name AS tenant_name,"
+           "c.last_seen,c.onboarded,c.tenant_id,c.ninja_device_id,t.name AS tenant_name,"
            "(SELECT COUNT(*) FROM computer_state s WHERE s.computer_id=c.id AND s.compliant=0) AS noncompliant,"
            "(SELECT GROUP_CONCAT(g.name, ', ') FROM computer_tags ct JOIN tags g ON g.id=ct.tag_id "
            " WHERE ct.computer_id=c.id) AS tags "
@@ -310,6 +312,11 @@ def get_computer(cid: int, _: dict = Depends(current_user)) -> dict:
         })
     c["desired"] = sorted(desired, key=lambda x: (x["item_type"], x["name"].lower()))
     c["sessions"] = db.all("SELECT * FROM sessions WHERE computer_id=? ORDER BY id DESC LIMIT 25", (cid,))
+    c["ninja"] = None
+    if c.get("ninja_device_id"):
+        nd = db.one("SELECT * FROM ninja_devices WHERE id=?", (c["ninja_device_id"],))
+        if nd:
+            c["ninja"] = {**nd, "url": ninjaone.device_url(db, nd["id"])}
     return c
 
 
@@ -687,6 +694,125 @@ def cancel_session(sid: int, user: dict = Depends(current_user)) -> dict:
                "AND status IN ('pending','running')", (sid,))
         engine.log(db, sid, None, f"Session cancelled by {user['username']}")
     return {"ok": True}
+
+
+# ---- NinjaOne --------------------------------------------------------------
+
+def _ninja(fn, *args, **kw):
+    try:
+        return fn(*args, **kw)
+    except ninjaone.NinjaError as e:
+        raise HTTPException(502, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class NinjaSettingsIn(BaseModel):
+    base_url: Optional[str] = None
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
+    scope: Optional[str] = None
+    device_classes: Optional[str] = None
+    custom_field: Optional[str] = None
+    push_keys: Optional[bool] = None
+    auto_create_tenants: Optional[bool] = None
+    script_id: Optional[str] = None
+    run_as: Optional[str] = None
+    sync_interval: Optional[str] = None
+
+
+@app.get("/api/ninjaone")
+def ninja_settings(_: dict = Depends(require_admin)) -> dict:
+    return ninjaone.public_settings(db)
+
+
+@app.put("/api/ninjaone")
+def ninja_save(body: NinjaSettingsIn, _: dict = Depends(require_admin)) -> dict:
+    _ninja(ninjaone.save_settings, db, body.model_dump(exclude_none=True))
+    return ninjaone.public_settings(db)
+
+
+@app.post("/api/ninjaone/test")
+def ninja_test(_: dict = Depends(require_admin)) -> dict:
+    client = _ninja(ninjaone.NinjaClient.from_db, db)
+    orgs = _ninja(client.organizations)
+    return {"ok": True, "organizations": len(orgs)}
+
+
+@app.post("/api/ninjaone/sync")
+def ninja_sync(_: dict = Depends(current_user)) -> dict:
+    return _ninja(ninjaone.sync, db)
+
+
+@app.get("/api/ninjaone/orgs")
+def ninja_orgs(_: dict = Depends(current_user)) -> list[dict]:
+    return db.all(
+        "SELECT o.*, t.id AS tenant_id, t.name AS tenant_name, "
+        "(SELECT COUNT(*) FROM ninja_devices d WHERE d.organization_id=o.id) AS device_count, "
+        "(SELECT COUNT(*) FROM ninja_devices d WHERE d.organization_id=o.id AND d.computer_id IS NOT NULL) AS agent_count "
+        "FROM ninja_orgs o LEFT JOIN tenants t ON t.ninja_org_id=o.id ORDER BY o.name COLLATE NOCASE")
+
+
+class NinjaLinkIn(BaseModel):
+    tenant_id: Optional[int] = None   # null unlinks
+    create: bool = False              # create a tenant named after the org
+
+
+@app.put("/api/ninjaone/orgs/{org_id}/link")
+def ninja_link(org_id: int, body: NinjaLinkIn, _: dict = Depends(require_admin)) -> dict:
+    org = db.one("SELECT * FROM ninja_orgs WHERE id=?", (org_id,))
+    if not org:
+        raise HTTPException(404, "unknown NinjaOne organization (sync first)")
+    with db.tx():
+        db.run("UPDATE tenants SET ninja_org_id=NULL WHERE ninja_org_id=?", (org_id,))
+        if body.create:
+            if db.one("SELECT id FROM tenants WHERE lower(name)=lower(?)", (org["name"],)):
+                raise HTTPException(409, f"a tenant named {org['name']!r} already exists; link it instead")
+            db.run("INSERT INTO tenants(name,enrollment_key,ninja_org_id,created_at) VALUES(?,?,?,?)",
+                   (org["name"], new_enrollment_key(), org_id, now()))
+        elif body.tenant_id is not None:
+            _get("tenants", body.tenant_id)
+            db.run("UPDATE tenants SET ninja_org_id=? WHERE id=?", (org_id, body.tenant_id))
+    return {"ok": True}
+
+
+@app.get("/api/ninjaone/devices")
+def ninja_devices(_: dict = Depends(current_user)) -> list[dict]:
+    rows = db.all(
+        "SELECT d.*, o.name AS org_name, t.name AS tenant_name, c.name AS computer_name, c.last_seen AS agent_last_seen "
+        "FROM ninja_devices d LEFT JOIN ninja_orgs o ON o.id=d.organization_id "
+        "LEFT JOIN tenants t ON t.ninja_org_id=d.organization_id "
+        "LEFT JOIN computers c ON c.id=d.computer_id ORDER BY d.name COLLATE NOCASE")
+    for r in rows:
+        r["url"] = ninjaone.device_url(db, r["id"])
+    return rows
+
+
+class NinjaDeployIn(BaseModel):
+    device_ids: list[int] = Field(default_factory=list)
+    all_missing: bool = False
+
+
+@app.post("/api/ninjaone/deploy")
+def ninja_deploy(body: NinjaDeployIn, request: Request, _: dict = Depends(require_admin)) -> dict:
+    ids = list(body.device_ids)
+    if body.all_missing:
+        ids += [r["id"] for r in db.all(
+            "SELECT d.id FROM ninja_devices d JOIN tenants t ON t.ninja_org_id=d.organization_id "
+            "WHERE d.computer_id IS NULL")]
+    if not ids:
+        raise HTTPException(400, "no devices selected")
+    return _ninja(ninjaone.deploy_agent, db, sorted(set(ids)), agent_api.public_url(request))
+
+
+@app.get("/api/ninjaone/script", response_class=PlainTextResponse)
+def ninja_script(request: Request, _: dict = Depends(require_admin)) -> str:
+    path = os.path.join(os.path.dirname(_STATIC), "deploy", "ninjaone-install-macstate.sh")
+    with open(path) as fh:
+        text = fh.read()
+    field = ninjaone.get_settings(db)["custom_field"] or "macstateEnrollmentKey"
+    return (text.replace("__SERVER__", shlex.quote(agent_api.public_url(request)))
+                .replace("__FIELD__", shlex.quote(field)))
 
 
 # ---- dashboard -------------------------------------------------------------

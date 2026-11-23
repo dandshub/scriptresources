@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from . import config, engine
+from . import config, engine, ninjaone
 from .db import db, dumps, now
 from .security import new_token, token_hash
 
@@ -154,6 +154,7 @@ def enroll(req: EnrollRequest, request: Request) -> dict:
             (tenant["id"], req.hostname or req.serial or "Mac", req.serial, token_hash(token), now()),
         )
     _update_facts(cid, req, request)
+    ninjaone.link_new_computer(db, cid, req.serial)
     comp = db.one("SELECT * FROM computers WHERE id=?", (cid,))
     if not existing and tenant["onboarding_enabled"]:
         engine.create_session(db, comp, "onboarding", "apply", created_by="enrollment")
