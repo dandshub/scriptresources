@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MacState</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="login" class="login hidden">
+    <form id="login-form" class="card login-card">
+      <h1><span class="logo">◆</span> MacState</h1>
+      <p class="muted">Desired-state software &amp; configuration for Macs</p>
+      <label>Username<input name="username" autocomplete="username" required></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <div id="login-error" class="error"></div>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+  </div>
+  <div id="app" class="app hidden">
+    <nav class="sidebar">
+      <div class="brand"><span class="logo">◆</span> MacState</div>
+      <a href="#/" data-nav="">Dashboard</a>
+      <a href="#/computers" data-nav="computers">Computers</a>
+      <a href="#/tenants" data-nav="tenants">Tenants</a>
+      <div class="nav-section">Library</div>
+      <a href="#/software" data-nav="software">Software</a>
+      <a href="#/tasks" data-nav="tasks">Tasks</a>
+      <div class="nav-section">Automation</div>
+      <a href="#/deployments" data-nav="deployments">Deployments</a>
+      <a href="#/schedules" data-nav="schedules">Schedules</a>
+      <a href="#/sessions" data-nav="sessions">Sessions</a>
+      <div class="nav-section">Admin</div>
+      <a href="#/settings" data-nav="settings">Settings</a>
+      <div class="sidebar-foot"><span id="whoami"></span> · <a href="#" id="logout">Sign out</a></div>
+    </nav>
+    <main id="main"></main>
+  </div>
+  <div id="modal" class="modal hidden"><div class="modal-box card" id="modal-box"></div></div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
